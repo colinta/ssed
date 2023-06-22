@@ -1,0 +1,27 @@
+{
+  "name": "ssed",
+  "version": "1.0.0",
+  "description": "Fed up with trying to remember sed's weird regex support? Me, too.",
+  "main": "ssed",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "bin": { "ssed": "./ssed" },
+  "dependencies": {},
+  "devDependencies": {},
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/colinta/ssed.git"
+  },
+  "keywords": [
+    "sed"
+  ],
+  "author": "Colin T.A. Gray <colinta@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/colinta/ssed/issues"
+  },
+  "homepage": "https://github.com/colinta/ssed#readme"
+}

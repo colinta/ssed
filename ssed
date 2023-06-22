@@ -1,0 +1,190 @@
+#!/usr/bin/env node
+const EventEmitter = require('events');
+
+function toDelim(delim) {
+  if (delim === '{' || delim === '}') {
+    return /[\{\}]/
+  }
+  if (delim === '[' || delim === ']') {
+    return /[\[\]]/
+  }
+  if (delim === '(' || delim === ')') {
+    return /[\(\)]/
+  }
+  if (delim === '<' || delim === '>') {
+    return /[<>]/
+  }
+
+  return delim
+}
+
+let printOn = null
+function toPipe(rule) {
+  const command = rule.match(/^(\w+\b|\d+)(.)/)
+  if (!command) {
+    throw Error(`Invalid: ${rule}`)
+  }
+  const [cmd, delim] = [command[1], command[2]]
+  const [_, ...args] = rule.slice(delim.length).split(toDelim(delim))
+  const [match, replace] = args
+
+  if (cmd === 'sub' || cmd === 's') {
+    // this is text | sub/this/that => that is text
+    // this is text | s|this|that => that is text
+    const regex = new RegExp(match)
+    return (line) => {
+      return line.replace(regex, replace)
+    }
+  } else if (cmd === 'gsub' || cmd === 'g') {
+    // this is text | sub/t/T => This is TexT
+    // this is text | s|\bt|T => This is Text
+    const regex = new RegExp(match, 'g')
+    return (line) => {
+      return line.replace(regex, replace)
+    }
+  } else if (cmd === 'take' || cmd === 't') {
+    // this is text | take/t\w+ => this
+    // this is text | +/t\w+ => this
+    const regex = new RegExp(match)
+    return (line) => {
+      const match = line.match(regex)
+      if (match && match[0]) {
+        return match[0]
+      }
+      return line
+    }
+  } else if (cmd === 'remove' || cmd === 'rm' || cmd === 'r') {
+    // this is text | remove/\w+is => is text
+    // this is text | -- +is => this text
+    const regex = new RegExp(match)
+    return (line) => {
+      if (line.match(regex)) {
+        return line.replace(regex, '')
+      }
+      return line
+    }
+  } else if (cmd === 'on' || cmd === 'o') {
+    // this
+    // 1
+    // is
+    // long
+    // 2
+    // text | on/1 => 1
+    //                is
+    //                long
+    //                2
+    //                text
+    const regex = new RegExp(match)
+    return (line) => {
+      if (line.match(regex) || printOn === true) {
+        printOn = true
+        return line
+      }
+    }
+  } else if (cmd === 'after' || cmd === 'a') {
+    // this
+    // 1
+    // is
+    // long
+    // 2
+    // text | after/1 => is
+    //                   long
+    //                   2
+    //                   text
+    const regex = new RegExp(match)
+    return (line) => {
+      if (line.match(regex)) {
+        printOn = true
+      } else if (printOn === true) {
+        return line
+      }
+    }
+  } else if (cmd === 'off' || cmd === 'f') {
+    // this
+    // 1
+    // is
+    // long
+    // 2
+    // text | after/1 off/2 => is
+    //                         long
+    const regex = new RegExp(match)
+    return (line) => {
+      if (line.match(regex)) {
+        printOn = false
+      } else {
+        return line
+      }
+    }
+  } else if (cmd.match(/^\d+$/)) {
+    // this is text | 1/\w(\w+)$ => ext
+    // this is text | 2/(\w+) (\w+) (\w+) => is
+    const regex = new RegExp(match)
+    return (line) => {
+      const match = line.match(regex)
+      const index = parseInt(cmd)
+      if (match && match[index]) {
+        return match[index]
+      }
+    }
+  } else if (cmd === 'print' || cmd === 'p') {
+    // this
+    // is
+    // text | p/^t => this
+    //                text
+    const regex = new RegExp(match)
+    return (line) => {
+      if (line.match(regex)) {
+        return line
+      }
+    }
+  } else if (cmd === 'kill' || cmd === 'k') {
+    // this
+    // is
+    // some
+    // text | k/is => some
+    //                text
+    const regex = new RegExp(match)
+    return (line) => {
+      if (!line.match(regex)) {
+        return line
+      }
+    }
+  } else {
+    throw new Error(`Unsupported ${cmd}`)
+  }
+}
+
+function lineStream(inputStream) {
+  const stdin = new EventEmitter();
+  let buffer = ''
+
+  inputStream.resume()
+  inputStream.setEncoding('utf-8')
+  inputStream.on('data', function(chunk) {
+    buffer += chunk
+    const lines = buffer.split("\n")
+    buffer = lines.pop()
+    lines.forEach(line => stdin.emit('line', line));
+  });
+
+  inputStream.on('end', () => {
+    if (buffer.length > 0) stdin.emit('line', buffer);
+    stdin.emit('end')
+  })
+
+  return stdin
+}
+
+const args = process.argv.slice(2)
+const pipes = args.map(toPipe)
+
+const stdin = lineStream(process.stdin)
+stdin.on('line', line => {
+  for (const pipe of pipes) {
+    line = pipe(line)
+    if (line === undefined) {
+      return
+    }
+  }
+  console.log(line)
+})
