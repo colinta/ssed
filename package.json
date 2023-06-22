@@ -1,0 +1,27 @@
+{
+  "name": "fed",
+  "version": "1.0.0",
+  "description": "**fed** up with trying to remember sed's weird regex support? Me, too.",
+  "main": "fed",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "bin": { "fed": "./fed" }
+  "dependencies": {},
+  "devDependencies": {},
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/colinta/fed.git"
+  },
+  "keywords": [
+    "sed"
+  ],
+  "author": "Colin T.A. Gray <colinta@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/colinta/fed/issues"
+  },
+  "homepage": "https://github.com/colinta/fed#readme"
+}
