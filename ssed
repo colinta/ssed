@@ -18,16 +18,39 @@ function toDelim(delim) {
   return delim
 }
 
+function unescape(str) {
+  return str.replace(/\\(.)/g, (match, char) => {
+    if (char === 'n') {
+      return '\n'
+    }
+    if (char === 't') {
+      return '\t'
+    }
+    return `\\${char}`
+  })
+}
+
+// commands on, after, and off all share this value, turns printing on/off
 let printOn = null
-function toPipe(rule) {
+
+function parseRuleArgs(rule) {
   const command = rule.match(/^(\w+\b|\d+)(.)/)
   if (!command) {
-    throw Error(`Invalid: ${rule}`)
+    const [simpleCommand] = rule.match(/^(\w+\b|\d+)$/)
+    if (!simpleCommand) {
+      throw Error(`Invalid: ${rule}`)
+    }
+    return [simpleCommand, '', '', []]
   }
+
   const [cmd, delim] = [command[1], command[2]]
-  const [_, ...args] = rule.slice(delim.length).split(toDelim(delim))
+  const [, ...args] = rule.slice(delim.length).split(toDelim(delim)).map(unescape)
   const [match, replace] = args
 
+  return [cmd, match, replace, args]
+}
+
+function toLineRule([cmd, match, replace, args]) {
   if (cmd === 'sub' || cmd === 's') {
     // this is text | sub/this/that => that is text
     // this is text | s|this|that => that is text
@@ -149,14 +172,42 @@ function toPipe(rule) {
         return line
       }
     }
-  } else {
-    throw new Error(`Unsupported ${cmd}`)
+  } else if (cmd === 'uniq') {
+    const lines = []
+    return (line) => {
+      if (lines.indexOf(line) === -1) {
+        lines.push(line)
+        return line
+      }
+    }
   }
 }
 
-function lineStream(inputStream) {
+function toDocumentRule([cmd, match, replace, args]) {
+  if (cmd === 'sort') {
+    return (lines) => {
+      return lines.sort()
+    }
+  } else if (cmd === 'reverse') {
+    return (lines) => {
+      return lines.reverse()
+    }
+  }
+}
+
+function lineStream(inputStream, transform) {
   const stdin = new EventEmitter();
   let buffer = ''
+
+  function emit(line) {
+    if (transform) {
+      line = transform(line)
+    }
+
+    if (line !== undefined) {
+      stdin.emit('line', line)
+    }
+  }
 
   inputStream.resume()
   inputStream.setEncoding('utf-8')
@@ -164,27 +215,64 @@ function lineStream(inputStream) {
     buffer += chunk
     const lines = buffer.split("\n")
     buffer = lines.pop()
-    lines.forEach(line => stdin.emit('line', line));
+    lines.forEach(line => emit(line));
   });
 
   inputStream.on('end', () => {
-    if (buffer.length > 0) stdin.emit('line', buffer);
+    if (buffer.length > 0) emit(buffer);
     stdin.emit('end')
   })
+
+  stdin.pipe = (transform) => {
+    return lineStream(stdin, transform)
+  }
 
   return stdin
 }
 
 const args = process.argv.slice(2)
-const pipes = args.map(toPipe)
+const lineRules = []
+const documentRules = []
+for (const arg of args) {
+  const parsed = parseRuleArgs(arg)
+  let lineRule, documentRule
+  if (lineRule = toLineRule(parsed)) {
+    if (documentRules.length) {
+      throw new Error('Document rules are only supported *after* all the line rules (use multiple ssed pipes I guess?)')
+    }
+
+    lineRules.push(lineRule)
+  } else if (documentRule = toDocumentRule(parsed)) {
+    documentRules.push(documentRule)
+  } else {
+    throw new Error(`Invalid rule: ${arg}`)
+  }
+}
 
 const stdin = lineStream(process.stdin)
+let lines = []
 stdin.on('line', line => {
-  for (const pipe of pipes) {
-    line = pipe(line)
+  for (const lineRule of lineRules) {
+    line = lineRule(line)
     if (line === undefined) {
       return
     }
   }
-  console.log(line)
-})
+  if (documentRules.length) {
+    lines.push(line)
+  } else {
+    process.stdout.write(line + "\n")
+  }
+}).on('end', () => {
+  if (documentRules.length === 0) {
+    return
+  }
+
+  for (const documentRule of documentRules) {
+    lines = documentRule(lines)
+    if (!lines?.length) {
+      return
+    }
+  }
+  process.stdout.write(lines.join("\n"))
+});
