@@ -20,7 +20,7 @@ function toDelim(delim) {
 }
 
 function unescape(str) {
-  return str.replace(/\\(.)/g, (match, char) => {
+  return str.replace(/\\(.)/g, (_, char) => {
     if (char === "n") {
       return "\n";
     }
@@ -51,7 +51,7 @@ function parseRuleArgs(rule) {
   return [cmd, match, replace, args];
 }
 
-function toLineRule([cmd, match, replace, args], state) {
+function toLineRule([cmd, match, replace], state) {
   if (cmd === "sub" || cmd === "s") {
     // this is text | sub/this/that => that is text
     // this is text | s|this|that => that is text
@@ -61,14 +61,15 @@ function toLineRule([cmd, match, replace, args], state) {
     };
   } else if (cmd === "gsub" || cmd === "g") {
     // this is text | sub/t/T => This is TexT
-    // this is text | s|\bt|T => This is Text
+    // this is text | s|t|T => This is Text
     const regex = new RegExp(match, "g");
     return (line) => {
       return line.replace(regex, replace);
     };
   } else if (cmd === "take" || cmd === "t") {
     // this is text | take/t\w+ => this
-    // this is text | +/t\w+ => this
+    // this is text | t/t\w+ => this
+    // how now      | take/t\w+ => how now
     const regex = new RegExp(match);
     return (line) => {
       const match = line.match(regex);
@@ -77,9 +78,8 @@ function toLineRule([cmd, match, replace, args], state) {
       }
       return line;
     };
-  } else if (cmd === "remove" || cmd === "rm" || cmd === "r") {
-    // this is text | remove/\w+is => is text
-    // this is text | -- +is => this text
+  } else if (cmd === "rm" || cmd === "r") {
+    // this is text | rm/^\w+ is/ => text
     const regex = new RegExp(match);
     return (line) => {
       if (line.match(regex)) {
@@ -98,9 +98,14 @@ function toLineRule([cmd, match, replace, args], state) {
     //                long
     //                2
     //                text
-    const regex = new RegExp(match);
+    let check = (line) => true
+    if (match) {
+      const regex = new RegExp(match);
+      check = (line) => line.match(regex)
+    }
+
     return (line) => {
-      if (line.match(regex) || state.printOn === true) {
+      if (check(line) || state.printOn === true) {
         state.printOn = true;
         return line;
       }
@@ -115,9 +120,14 @@ function toLineRule([cmd, match, replace, args], state) {
     //                   long
     //                   2
     //                   text
-    const regex = new RegExp(match);
+    let check = (line) => true
+    if (match) {
+      const regex = new RegExp(match);
+      check = (line) => line.match(regex)
+    }
+
     return (line) => {
-      if (line.match(regex)) {
+      if (check(line)) {
         state.printOn = true;
       } else if (state.printOn === true) {
         return line;
@@ -131,23 +141,32 @@ function toLineRule([cmd, match, replace, args], state) {
     // 2
     // text | after/1 off/2 => is
     //                         long
-    const regex = new RegExp(match);
+    let check = (line) => true
+    if (match) {
+      const regex = new RegExp(match);
+      check = (line) => line.match(regex)
+    }
+
     return (line) => {
-      if (line.match(regex)) {
+      if (check(line)) {
         state.printOn = false;
-      } else {
+      } else if (state.printOn === true) {
         return line;
       }
     };
   } else if (cmd.match(/^\d+$/)) {
     // this is text | 1/\w(\w+)$ => ext
     // this is text | 2/(\w+) (\w+) (\w+) => is
+    const index = parseInt(cmd);
     const regex = new RegExp(match);
     return (line) => {
       const match = line.match(regex);
-      const index = parseInt(cmd);
-      if (match && match[index]) {
-        return match[index];
+      if (match) {
+        if (match[index]) {
+          return match[index];
+        }
+      } else {
+        return line;
       }
     };
   } else if (cmd === "print" || cmd === "p") {
@@ -173,18 +192,29 @@ function toLineRule([cmd, match, replace, args], state) {
         return line;
       }
     };
-  } else if (cmd === "uniq") {
+  } else if (cmd === "uniq" || cmd === "unique") {
     const lines = [];
+    let part = (line) => line
+    if (match) {
+      const regex = new RegExp(match);
+      part = (line) => line.match(regex)?.[0]
+    }
+
     return (line) => {
-      if (lines.indexOf(line) === -1) {
-        lines.push(line);
+      match = part(line)
+      if (match == null) {
+        return null
+      }
+
+      if (lines.indexOf(match) === -1) {
+        lines.push(match);
         return line;
       }
     };
   }
 }
 
-function toDocumentRule([cmd, match, replace, args]) {
+function toDocumentRule([cmd, match, replace]) {
   if (cmd === "sort") {
     return (lines) => {
       return lines.sort();
@@ -203,7 +233,7 @@ function lineStream(inputStream, transform = undefined) {
 
   function emit(line) {
     if (closed) {
-      return
+      return;
     }
 
     if (transform) {
@@ -268,11 +298,61 @@ function parseOption(arg) {
   switch (option) {
     case "h":
     case "help": {
+      process.sterr.write(`usage: ssed [options] [rules]
+
+Options:
+  --diff                       Only show differences
+  --color                      Enable ANSI colors (true if stdout is a TTY)
+  --input                      Take file names from standard input (\`ls | ssed --input\`)
+  --input=fromfile             Use 'fromfile' as input
+  --input=fromfile1,fromfile2  Run against multiple files.
+  --write                      Write each changed file in place.
+  --write=tofile               Provide a destination file name.
+  --write=to\${file}           \${file} is replaced with the input file.
+  --write=\${}.backup          \${} is replaced with the input file.
+  --interactive                Ask before writing the file
+  --dry-run (-n)               Show which files would be affected.
+
+Line Rules
+----------
+Line rules operate on every line. Commands 'on', 'after' and 'off' share the on/off state.
+
+  s/search/replace (aka sub/…/…)   Replace the first instance of 'search' with 'replace'
+  g/search/replace (aka gsub/…/…)  Replace every instance of 'search' with 'replace'
+  t/pattern (aka take/…)           Only print the matching part of the line, or print the entire line if 'pattern' doesn't match
+  1/pattern                        Only print the first group of the match
+  r/pattern (aka rm/…)             Remove the matching part of the line, or print the entire line if 'pattern' doesn't match
+  o/pattern (aka on/…)             Start printing on the line where 'pattern' is matched
+  a/pattern (aka after/…)          Start printing on the line *after* 'pattern' is matched
+  f/pattern (aka off/…)            Turn printing off on the line where 'pattern' is matched
+  p/pattern (aka print/…)          Only print lines that match 'pattern'
+  k/pattern (aka kill/…)           Do not print lines that match 'pattern'
+  uniq (aka unique)                Only print unique lines
+  uniq/pattern                     Only print matching lines, and only unique matches
+
+Document Rules:
+  sort
+  reverse
+
+Separators:
+  s/foo/bar
+  s/foo/bar/
+  s|foo|bar
+  s{foo}bar
+`);
+      process.exit(0);
     }
     case "no-color":
     case "color": {
       return {
         color: option === "color",
+      };
+    }
+    case "n":
+    case "no-dry-run":
+    case "dry-run": {
+      return {
+        dryRun: option === "dry-run",
       };
     }
     case "no-diff":
@@ -306,18 +386,18 @@ function parseOption(arg) {
           case "stdin":
             return { input: process.stdin };
           default:
-            const files = file.split(',');
+            const files = file.split(",");
             if (files.length > 1) {
               return {
                 inputFromFile: true,
-                input: files.map(file => {
+                input: files.map((file) => {
                   if (fs.existsSync(file)) {
                     return file;
                   } else {
                     throw Error(`File does not exist: ${file}`);
                   }
-                })
-              }
+                }),
+              };
             } else {
               if (fs.existsSync(file)) {
                 return { input: file, inputFromFile: true };
@@ -346,7 +426,7 @@ function main(args) {
     diffContext: 3, // number of lines to print before and after diffs
     color: process.stdout.isTTY,
     print: (line, nl = true) => {
-      process.stdout.write(line + (nl ? "\n" : ''));
+      process.stdout.write(line + (nl ? "\n" : ""));
     },
   };
 
@@ -367,7 +447,7 @@ function main(args) {
     }
   }
 
-  if (options.inputFromFile && typeof options.input !== 'string') {
+  if (options.inputFromFile && typeof options.input !== "string") {
     args = args.filter((arg) => !arg.startsWith("--input"));
 
     const files = [];
@@ -411,6 +491,10 @@ function main(args) {
     const file = options.input;
     if (options.write && !options.writeToFile && file !== process.stdin) {
       options.writeToFile = file;
+    } else if (options.writeToFile) {
+      options.writeToFile = options.writeToFile
+        .replace("${file}", file)
+        .replace("${}", file);
     }
 
     options.input = fs.createReadStream(file);
@@ -451,7 +535,7 @@ function main(args) {
 
       originalLines.push([original, line ?? ""]);
 
-      if (line !== null) {
+      if (line != null) {
         lines.push(line);
       }
     })
@@ -558,28 +642,55 @@ function main(args) {
         if (options.write && lineRun.hasDiff) {
           if (options.interactive) {
             if (!process.stdin.isTTY) {
-              options.print(red(`Cannot run interactively – input is coming from stdin`, options.color));
+              options.print(
+                red(
+                  `Cannot run interactively – input is coming from stdin`,
+                  options.color,
+                ),
+              );
               process.exit(1);
             }
 
-            options.print(yellow(`Write changes to ${options.writeToFile}? [Yn] `, options.color), false);
+            options.print(
+              yellow(
+                `Write changes to ${options.writeToFile}? [Yn] `,
+                options.color,
+              ),
+              false,
+            );
             keepOpen();
 
             const stdin = lineStream(process.stdin);
             stdin.on("line", (line) => {
-              if (line === '' || line === "y" || line === "yes") {
-                writeLinesToFile(lines, options.writeToFile)
-              } else if (line === 'n'){
-                options.print(yellow(`Skipping ${options.writeToFile}`, options.color));
+              if (line === "" || line === "y" || line === "yes") {
+                if (options.dryRun) {
+                  options.print(
+                    yellow(`Dry Run: ${options.writeToFile}`, options.color),
+                  );
+                } else {
+                  writeLinesToFile(lines, options.writeToFile);
+                }
+              } else if (line === "n") {
+                options.print(
+                  yellow(`Skipping ${options.writeToFile}`, options.color),
+                );
               } else {
-                options.print(red(`Unknown response '${line}'. Aborting`, options.color));
+                options.print(
+                  red(`Unknown response '${line}'. Aborting`, options.color),
+                );
                 process.exit(1);
               }
               stdin.close();
               close();
             });
           } else {
-            writeLinesToFile(lines, options.writeToFile)
+            if (options.dryRun) {
+              options.print(
+                yellow(`Dry Run: ${options.writeToFile}`, options.color),
+              );
+            } else {
+              writeLinesToFile(lines, options.writeToFile);
+            }
           }
         }
       } else {
@@ -619,7 +730,7 @@ function magenta(input, enabled) {
 
 function escapeShell(arg) {
   if (arg.match(/[;\\]/)) {
-    return '"' + arg.replaceAll('\\', '\\\\').replaceAll('"', '\\"') + '"';
+    return '"' + arg.replaceAll("\\", "\\\\").replaceAll('"', '\\"') + '"';
   }
 
   return arg;
