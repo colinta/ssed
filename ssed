@@ -196,11 +196,16 @@ function toDocumentRule([cmd, match, replace, args]) {
   }
 }
 
-function lineStream(inputStream, transform) {
+function lineStream(inputStream, transform = undefined) {
   const stdin = new EventEmitter();
   let buffer = "";
+  let closed = false;
 
   function emit(line) {
+    if (closed) {
+      return
+    }
+
     if (transform) {
       line = transform(line);
     }
@@ -224,9 +229,24 @@ function lineStream(inputStream, transform) {
 
   inputStream.on("end", () => {
     if (buffer.length > 0) emit(buffer);
-    stdin.emit("end");
+    let autoclose = true;
+    function keepOpen() {
+      autoclose = false;
+    }
+    function close() {
+      stdin.emit("close");
+    }
+    stdin.emit("end", keepOpen, close);
+    if (autoclose) {
+      close();
+    }
   });
 
+  stdin.pause = inputStream.pause.bind(inputStream);
+  stdin.close = () => {
+    closed = true;
+    inputStream.pause();
+  };
   stdin.pipe = (transform) => {
     return lineStream(stdin, transform);
   };
@@ -261,33 +281,51 @@ function parseOption(arg) {
         diff: option === "diff",
       };
     }
+    case "no-interactive":
+    case "interactive": {
+      return {
+        interactive: option === "interactive",
+      };
+    }
+    case "no-write":
+    case "write": {
+      const [, writeToFile] = arg.split("=", 2);
+
+      return {
+        write: option === "write",
+        diff: option === "write",
+        writeToFile,
+      };
+    }
     case "input": {
-      const [, source] = arg.split("=", 2);
-      if (source === undefined) {
-        return { inputFile: true, input: null };
+      const [, file] = arg.split("=", 2);
+      if (file === undefined) {
+        return { inputFromFile: true, input: null };
       } else {
-        switch (source) {
+        switch (file) {
           case "stdin":
             return { input: process.stdin };
           default:
-            if (fs.existsSync(source)) {
-              return { input: source, inputFile: true };
+            const files = file.split(',');
+            if (files.length > 1) {
+              return {
+                inputFromFile: true,
+                input: files.map(file => {
+                  if (fs.existsSync(file)) {
+                    return file;
+                  } else {
+                    throw Error(`File does not exist: ${file}`);
+                  }
+                })
+              }
             } else {
-              throw Error(`File does not exist: ${source}`);
+              if (fs.existsSync(file)) {
+                return { input: file, inputFromFile: true };
+              } else {
+                throw Error(`File does not exist: ${file}`);
+              }
             }
         }
-      }
-      break;
-    }
-    case "output": {
-      const [, source] = arg.split("=", 2);
-      switch (source) {
-        case "stdout":
-          return { output: process.stdout };
-        case "stderr":
-          return { output: process.stderr };
-        default:
-          throw Error(`Invalid value for --output: ${source}`);
       }
       break;
     }
@@ -298,11 +336,18 @@ function parseOption(arg) {
 
 function main(args) {
   let options = {
-    inputFile: false,
     input: process.stdin,
-    output: process.stdout,
+    inputFromFile: false,
+    interactive: false,
+    write: false,
+    writeToFile: null,
     diff: false,
+    diffHeader: "",
+    diffContext: 3, // number of lines to print before and after diffs
     color: process.stdout.isTTY,
+    print: (line, nl = true) => {
+      process.stdout.write(line + (nl ? "\n" : ''));
+    },
   };
 
   const lineRules = [];
@@ -322,41 +367,53 @@ function main(args) {
     }
   }
 
-  if (options.inputFile && options.input === null) {
-    const stdin = lineStream(process.stdin);
-    args = args.filter((arg) => arg !== "--input");
-    // treat stdin as list of files
+  if (options.inputFromFile && typeof options.input !== 'string') {
+    args = args.filter((arg) => !arg.startsWith("--input"));
+
     const files = [];
-    stdin
-      .on("line", (file) => {
-        files.push(file);
-      })
-      .on("end", () => {
-        function next() {
-          const file = files.pop();
-          if (!file) {
-            return;
+    function next() {
+      const file = files.pop();
+      if (!file) {
+        return;
+      }
+
+      main([`--input=${file}`, ...args])
+        .on("open", () => {
+          if (!options.diff) {
+            options.print(yellow(`ssed: ${file}`));
           }
-          main([`--input=${file}`, ...args])
-            .on("open", () => {
-              if (options.diff) {
-                options.output.write(
-                  yellow(`diff ${file}
---- ${file}
-+++ ssed --input=${file} ${args.map(escapeShell).join(" ")}`, options.color) + "\n",
-                );
-              } else {
-                options.output.write(`ssed: ${file}\n`);
-              }
-            })
-            .on("end", next);
-        }
-        next();
-      });
+        })
+        .on("close", next);
+    }
+
+    if (options.input === null) {
+      const stdin = lineStream(process.stdin);
+      // treat stdin as list of files
+
+      stdin
+        .on("line", (file) => {
+          files.push(file);
+        })
+        .on("close", () => {
+          next();
+        });
+    } else if (Array.isArray(options.input)) {
+      files.push(...options.input);
+      next();
+    }
 
     return;
-  } else if (options.inputFile) {
-    options.input = fs.createReadStream(options.input);
+  } else if (options.inputFromFile) {
+    options.diffHeader = `diff ${options.input}
+--- ${options.input}
++++ ssed ${args.map(escapeShell).join(" ")}`;
+
+    const file = options.input;
+    if (options.write && !options.writeToFile && file !== process.stdin) {
+      options.writeToFile = file;
+    }
+
+    options.input = fs.createReadStream(file);
   }
 
   for (const rule of rules) {
@@ -378,10 +435,10 @@ function main(args) {
     }
   }
 
-  const stdin = lineStream(options.input);
+  const inputStream = lineStream(options.input);
   const originalLines = [];
   let lines = [];
-  return stdin
+  return inputStream
     .on("line", (line) => {
       const original = line;
 
@@ -398,7 +455,7 @@ function main(args) {
         lines.push(line);
       }
     })
-    .on("end", () => {
+    .on("end", (keepOpen, close) => {
       for (const documentRule of documentRules) {
         lines = documentRule(lines);
         if (!lines?.length) {
@@ -407,39 +464,127 @@ function main(args) {
       }
 
       if (options.diff) {
-        let lineRun = { prev: [], next: [] };
+        let lineRun = {
+          hasDiff: false,
+          lineNumber: 0,
+          before: [],
+          prev: [],
+          next: [],
+          after: [],
+        };
 
-        function flush() {
-          for (const line of lineRun.prev) {
-            options.output.write(red(`-${line}`, options.color) + "\n");
+        function flush(EOF = false) {
+          const { before, prev, next, after, lineNumber } = lineRun;
+
+          if (!EOF && lineNumber === -1) {
+            return;
           }
-          for (const line of lineRun.next) {
-            options.output.write(green(`+${line}`, options.color) + "\n");
+
+          if (!EOF && after.length < options.diffContext) {
+            return;
           }
-          lineRun = { prev: [], next: [] };
+
+          if (EOF && prev.length === 0 && next.length === 0) {
+            return;
+          }
+
+          if (!lineRun.hasDiff) {
+            options.print(yellow(options.diffHeader, options.color));
+          }
+
+          const firstIndex = Math.max(before.length - options.diffContext, 0);
+          options.print(
+            magenta(
+              `@@ -${lineNumber + firstIndex},0 +${
+                lineNumber + firstIndex
+              },0 @@`,
+              options.color,
+            ),
+          );
+          for (const line of before.slice(firstIndex)) {
+            options.print(` ${line}`);
+          }
+
+          for (const line of prev) {
+            options.print(red(`-${line}`, options.color));
+          }
+          for (const line of next) {
+            options.print(green(`+${line}`, options.color));
+          }
+
+          for (const line of after) {
+            options.print(` ${line}`);
+          }
+
+          lineRun = {
+            before: [],
+            prev: [],
+            next: [],
+            after: [],
+            hasDiff: true,
+            lineNumber: -1,
+          };
         }
 
-        function push(prev, next) {
-          lineRun.prev.push(prev);
-          lineRun.next.push(next);
-        }
-
-        originalLines.forEach(([original, line], index) => {
-          if (documentRules.length) {
-            line = lines[index] ?? "";
+        function push(prev, next, lineNumber) {
+          if (lineRun.lineNumber === -1) {
+            lineRun.lineNumber = lineNumber;
           }
 
-          if (line === original) {
-            flush();
-            options.output.write(` ${line}\n`);
+          if (prev === next) {
+            if (lineRun.prev.length) {
+              lineRun.after.push(next);
+            } else {
+              lineRun.before.push(next);
+            }
+
+            flush(false);
           } else {
-            push(original, line);
+            lineRun.prev.push(prev);
+            lineRun.next.push(next);
           }
+        }
+
+        originalLines.forEach(([original, line], lineNumber) => {
+          if (documentRules.length) {
+            line = lines[lineNumber] ?? "";
+          }
+
+          push(original, line, lineNumber);
         });
-        flush();
+
+        flush(true);
+
+        if (options.write && lineRun.hasDiff) {
+          if (options.interactive) {
+            if (!process.stdin.isTTY) {
+              options.print(red(`Cannot run interactively – input is coming from stdin`, options.color));
+              process.exit(1);
+            }
+
+            options.print(yellow(`Write changes to ${options.writeToFile}? [Yn] `, options.color), false);
+            keepOpen();
+
+            const stdin = lineStream(process.stdin);
+            stdin.on("line", (line) => {
+              if (line === '' || line === "y" || line === "yes") {
+                writeLinesToFile(lines, options.writeToFile)
+              } else if (line === 'n'){
+                options.print(yellow(`Skipping ${options.writeToFile}`, options.color));
+              } else {
+                options.print(red(`Unknown response '${line}'. Aborting`, options.color));
+                process.exit(1);
+              }
+              stdin.close();
+              close();
+            });
+          } else {
+            writeLinesToFile(lines, options.writeToFile)
+          }
+        }
       } else {
         for (const line of lines) {
-          options.output.write(line + "\n");
+          options.print(line);
         }
       }
     });
@@ -457,21 +602,37 @@ function ansi(code, input) {
 }
 
 function red(input, enabled) {
-  return enabled ? ansi('1;31', input) : input;
+  return enabled ? ansi("1;31", input) : input;
 }
 
 function green(input, enabled) {
-  return enabled ? ansi('1;32', input) : input;
+  return enabled ? ansi("1;32", input) : input;
 }
 
 function yellow(input, enabled) {
-  return enabled ? ansi('38;5;227', input) : input;
+  return enabled ? ansi("38;5;227", input) : input;
+}
+
+function magenta(input, enabled) {
+  return enabled ? ansi("1;35", input) : input;
 }
 
 function escapeShell(arg) {
-  if (arg.match(/[;]/)) {
-    return '"' + arg.replaceAll('"', '\\"') + '"';
+  if (arg.match(/[;\\]/)) {
+    return '"' + arg.replaceAll('\\', '\\\\').replaceAll('"', '\\"') + '"';
   }
 
   return arg;
+}
+
+function writeLinesToFile(lines, file) {
+  if (!file) {
+    return;
+  }
+
+  if (Array.isArray(lines)) {
+    lines = lines.join("\n");
+  }
+
+  fs.writeFileSync(file, lines);
 }
