@@ -1,92 +1,93 @@
 #!/usr/bin/env node
-const EventEmitter = require('events');
+const fs = require("fs");
+const EventEmitter = require("events");
 
 function toDelim(delim) {
-  if (delim === '{' || delim === '}') {
-    return /[\{\}]/
+  if (delim === "{" || delim === "}") {
+    return /[\{\}]/;
   }
-  if (delim === '[' || delim === ']') {
-    return /[\[\]]/
+  if (delim === "[" || delim === "]") {
+    return /[\[\]]/;
   }
-  if (delim === '(' || delim === ')') {
-    return /[\(\)]/
+  if (delim === "(" || delim === ")") {
+    return /[\(\)]/;
   }
-  if (delim === '<' || delim === '>') {
-    return /[<>]/
+  if (delim === "<" || delim === ">") {
+    return /[<>]/;
   }
 
-  return delim
+  return delim;
 }
 
 function unescape(str) {
   return str.replace(/\\(.)/g, (match, char) => {
-    if (char === 'n') {
-      return '\n'
+    if (char === "n") {
+      return "\n";
     }
-    if (char === 't') {
-      return '\t'
+    if (char === "t") {
+      return "\t";
     }
-    return `\\${char}`
-  })
+    return `\\${char}`;
+  });
 }
-
-// commands on, after, and off all share this value, turns printing on/off
-let printOn = null
 
 function parseRuleArgs(rule) {
-  const command = rule.match(/^(\w+\b|\d+)(.)/)
+  const command = rule.match(/^(\w+\b|\d+)(.)/);
   if (!command) {
-    const [simpleCommand] = rule.match(/^(\w+\b|\d+)$/)
+    const [simpleCommand] = rule.match(/^(\w+\b|\d+)$/) ?? [];
     if (!simpleCommand) {
-      throw Error(`Invalid: ${rule}`)
+      throw Error(`Invalid: ${rule}`);
     }
-    return [simpleCommand, '', '', []]
+    return [simpleCommand, "", "", []];
   }
 
-  const [cmd, delim] = [command[1], command[2]]
-  const [, ...args] = rule.slice(delim.length).split(toDelim(delim)).map(unescape)
-  const [match, replace] = args
+  const [cmd, delim] = [command[1], command[2]];
+  const [, ...args] = rule
+    .slice(delim.length)
+    .split(toDelim(delim))
+    .map(unescape);
+  const [match, replace] = args;
 
-  return [cmd, match, replace, args]
+  return [cmd, match, replace, args];
 }
 
-function toLineRule([cmd, match, replace, args]) {
-  if (cmd === 'sub' || cmd === 's') {
+function toLineRule([cmd, match, replace, args], state) {
+  if (cmd === "sub" || cmd === "s") {
     // this is text | sub/this/that => that is text
     // this is text | s|this|that => that is text
-    const regex = new RegExp(match)
+    const regex = new RegExp(match);
     return (line) => {
-      return line.replace(regex, replace)
-    }
-  } else if (cmd === 'gsub' || cmd === 'g') {
+      return line.replace(regex, replace);
+    };
+  } else if (cmd === "gsub" || cmd === "g") {
     // this is text | sub/t/T => This is TexT
     // this is text | s|\bt|T => This is Text
-    const regex = new RegExp(match, 'g')
+    const regex = new RegExp(match, "g");
     return (line) => {
-      return line.replace(regex, replace)
-    }
-  } else if (cmd === 'take' || cmd === 't') {
+      return line.replace(regex, replace);
+    };
+  } else if (cmd === "take" || cmd === "t") {
     // this is text | take/t\w+ => this
     // this is text | +/t\w+ => this
-    const regex = new RegExp(match)
+    const regex = new RegExp(match);
     return (line) => {
-      const match = line.match(regex)
+      const match = line.match(regex);
       if (match && match[0]) {
-        return match[0]
+        return match[0];
       }
-      return line
-    }
-  } else if (cmd === 'remove' || cmd === 'rm' || cmd === 'r') {
+      return line;
+    };
+  } else if (cmd === "remove" || cmd === "rm" || cmd === "r") {
     // this is text | remove/\w+is => is text
     // this is text | -- +is => this text
-    const regex = new RegExp(match)
+    const regex = new RegExp(match);
     return (line) => {
       if (line.match(regex)) {
-        return line.replace(regex, '')
+        return line.replace(regex, "");
       }
-      return line
-    }
-  } else if (cmd === 'on' || cmd === 'o') {
+      return line;
+    };
+  } else if (cmd === "on" || cmd === "o") {
     // this
     // 1
     // is
@@ -97,14 +98,14 @@ function toLineRule([cmd, match, replace, args]) {
     //                long
     //                2
     //                text
-    const regex = new RegExp(match)
+    const regex = new RegExp(match);
     return (line) => {
-      if (line.match(regex) || printOn === true) {
-        printOn = true
-        return line
+      if (line.match(regex) || state.printOn === true) {
+        state.printOn = true;
+        return line;
       }
-    }
-  } else if (cmd === 'after' || cmd === 'a') {
+    };
+  } else if (cmd === "after" || cmd === "a") {
     // this
     // 1
     // is
@@ -114,15 +115,15 @@ function toLineRule([cmd, match, replace, args]) {
     //                   long
     //                   2
     //                   text
-    const regex = new RegExp(match)
+    const regex = new RegExp(match);
     return (line) => {
       if (line.match(regex)) {
-        printOn = true
-      } else if (printOn === true) {
-        return line
+        state.printOn = true;
+      } else if (state.printOn === true) {
+        return line;
       }
-    }
-  } else if (cmd === 'off' || cmd === 'f') {
+    };
+  } else if (cmd === "off" || cmd === "f") {
     // this
     // 1
     // is
@@ -130,149 +131,347 @@ function toLineRule([cmd, match, replace, args]) {
     // 2
     // text | after/1 off/2 => is
     //                         long
-    const regex = new RegExp(match)
+    const regex = new RegExp(match);
     return (line) => {
       if (line.match(regex)) {
-        printOn = false
+        state.printOn = false;
       } else {
-        return line
+        return line;
       }
-    }
+    };
   } else if (cmd.match(/^\d+$/)) {
     // this is text | 1/\w(\w+)$ => ext
     // this is text | 2/(\w+) (\w+) (\w+) => is
-    const regex = new RegExp(match)
+    const regex = new RegExp(match);
     return (line) => {
-      const match = line.match(regex)
-      const index = parseInt(cmd)
+      const match = line.match(regex);
+      const index = parseInt(cmd);
       if (match && match[index]) {
-        return match[index]
+        return match[index];
       }
-    }
-  } else if (cmd === 'print' || cmd === 'p') {
+    };
+  } else if (cmd === "print" || cmd === "p") {
     // this
     // is
     // text | p/^t => this
     //                text
-    const regex = new RegExp(match)
+    const regex = new RegExp(match);
     return (line) => {
       if (line.match(regex)) {
-        return line
+        return line;
       }
-    }
-  } else if (cmd === 'kill' || cmd === 'k') {
+    };
+  } else if (cmd === "kill" || cmd === "k") {
     // this
     // is
     // some
     // text | k/is => some
     //                text
-    const regex = new RegExp(match)
+    const regex = new RegExp(match);
     return (line) => {
       if (!line.match(regex)) {
-        return line
+        return line;
       }
-    }
-  } else if (cmd === 'uniq') {
-    const lines = []
+    };
+  } else if (cmd === "uniq") {
+    const lines = [];
     return (line) => {
       if (lines.indexOf(line) === -1) {
-        lines.push(line)
-        return line
+        lines.push(line);
+        return line;
       }
-    }
+    };
   }
 }
 
 function toDocumentRule([cmd, match, replace, args]) {
-  if (cmd === 'sort') {
+  if (cmd === "sort") {
     return (lines) => {
-      return lines.sort()
-    }
-  } else if (cmd === 'reverse') {
+      return lines.sort();
+    };
+  } else if (cmd === "reverse") {
     return (lines) => {
-      return lines.reverse()
-    }
+      return lines.reverse();
+    };
   }
 }
 
 function lineStream(inputStream, transform) {
   const stdin = new EventEmitter();
-  let buffer = ''
+  let buffer = "";
 
   function emit(line) {
     if (transform) {
-      line = transform(line)
+      line = transform(line);
     }
 
     if (line !== undefined) {
-      stdin.emit('line', line)
+      stdin.emit("line", line);
     }
   }
 
-  inputStream.resume()
-  inputStream.setEncoding('utf-8')
-  inputStream.on('data', function(chunk) {
-    buffer += chunk
-    const lines = buffer.split("\n")
-    buffer = lines.pop()
-    lines.forEach(line => emit(line));
+  inputStream.resume();
+  inputStream.setEncoding("utf-8");
+  inputStream.on("open", function () {
+    stdin.emit("open");
+  });
+  inputStream.on("data", function (chunk) {
+    buffer += chunk;
+    const lines = buffer.split("\n");
+    buffer = lines.pop();
+    lines.forEach((line) => emit(line));
   });
 
-  inputStream.on('end', () => {
+  inputStream.on("end", () => {
     if (buffer.length > 0) emit(buffer);
-    stdin.emit('end')
-  })
+    stdin.emit("end");
+  });
 
   stdin.pipe = (transform) => {
-    return lineStream(stdin, transform)
+    return lineStream(stdin, transform);
+  };
+
+  return stdin;
+}
+
+function parseOption(arg) {
+  let option;
+  if (arg.startsWith("--")) {
+    [option] = arg.slice(2).match(/^([\w-]+)/) ?? [option];
+  } else if (arg.startsWith("-")) {
+    [option] = arg.slice(1).match(/^(\w+)/) ?? [option];
+    return option.split("").map((opt) => parseOption(`--${opt}`));
+  } else {
+    return;
   }
 
+  switch (option) {
+    case "h":
+    case "help": {
+    }
+    case "no-color":
+    case "color": {
+      return {
+        color: option === "color",
+      };
+    }
+    case "no-diff":
+    case "diff": {
+      return {
+        diff: option === "diff",
+      };
+    }
+    case "input": {
+      const [, source] = arg.split("=", 2);
+      if (source === undefined) {
+        return { inputFile: true, input: null };
+      } else {
+        switch (source) {
+          case "stdin":
+            return { input: process.stdin };
+          default:
+            if (fs.existsSync(source)) {
+              return { input: source, inputFile: true };
+            } else {
+              throw Error(`File does not exist: ${source}`);
+            }
+        }
+      }
+      break;
+    }
+    case "output": {
+      const [, source] = arg.split("=", 2);
+      switch (source) {
+        case "stdout":
+          return { output: process.stdout };
+        case "stderr":
+          return { output: process.stderr };
+        default:
+          throw Error(`Invalid value for --output: ${source}`);
+      }
+      break;
+    }
+    default:
+      throw Error(`Invalid option: ${option}`);
+  }
+}
+
+function main(args) {
+  let options = {
+    inputFile: false,
+    input: process.stdin,
+    output: process.stdout,
+    diff: false,
+    color: process.stdout.isTTY,
+  };
+
+  const lineRules = [];
+  const documentRules = [];
+  const state = {
+    // line-commands `on`, `after`, and `off` all share this value; toggles printing on/off
+    printOn: null,
+  };
+
+  const rules = [];
+  for (const arg of args) {
+    const option = parseOption(arg);
+    if (option !== undefined) {
+      options = { ...options, ...option };
+    } else {
+      rules.push(arg);
+    }
+  }
+
+  if (options.inputFile && options.input === null) {
+    const stdin = lineStream(process.stdin);
+    args = args.filter((arg) => arg !== "--input");
+    // treat stdin as list of files
+    const files = [];
+    stdin
+      .on("line", (file) => {
+        files.push(file);
+      })
+      .on("end", () => {
+        function next() {
+          const file = files.pop();
+          if (!file) {
+            return;
+          }
+          main([`--input=${file}`, ...args])
+            .on("open", () => {
+              if (options.diff) {
+                options.output.write(
+                  yellow(`diff ${file}
+--- ${file}
++++ ssed --input=${file} ${args.map(escapeShell).join(" ")}`, options.color) + "\n",
+                );
+              } else {
+                options.output.write(`ssed: ${file}\n`);
+              }
+            })
+            .on("end", next);
+        }
+        next();
+      });
+
+    return;
+  } else if (options.inputFile) {
+    options.input = fs.createReadStream(options.input);
+  }
+
+  for (const rule of rules) {
+    const parsed = parseRuleArgs(rule);
+
+    let lineRule, documentRule;
+    if ((lineRule = toLineRule(parsed, state))) {
+      if (documentRules.length) {
+        throw Error(
+          "Document rules are only supported *after* all the line rules (use multiple ssed pipes I guess?)",
+        );
+      }
+
+      lineRules.push(lineRule);
+    } else if ((documentRule = toDocumentRule(parsed))) {
+      documentRules.push(documentRule);
+    } else {
+      throw Error(`Invalid rule: ${rule}`);
+    }
+  }
+
+  const stdin = lineStream(options.input);
+  const originalLines = [];
+  let lines = [];
   return stdin
+    .on("line", (line) => {
+      const original = line;
+
+      for (const lineRule of lineRules) {
+        line = lineRule(line);
+        if (line == null) {
+          break;
+        }
+      }
+
+      originalLines.push([original, line ?? ""]);
+
+      if (line !== null) {
+        lines.push(line);
+      }
+    })
+    .on("end", () => {
+      for (const documentRule of documentRules) {
+        lines = documentRule(lines);
+        if (!lines?.length) {
+          break;
+        }
+      }
+
+      if (options.diff) {
+        let lineRun = { prev: [], next: [] };
+
+        function flush() {
+          for (const line of lineRun.prev) {
+            options.output.write(red(`-${line}`, options.color) + "\n");
+          }
+          for (const line of lineRun.next) {
+            options.output.write(green(`+${line}`, options.color) + "\n");
+          }
+          lineRun = { prev: [], next: [] };
+        }
+
+        function push(prev, next) {
+          lineRun.prev.push(prev);
+          lineRun.next.push(next);
+        }
+
+        originalLines.forEach(([original, line], index) => {
+          if (documentRules.length) {
+            line = lines[index] ?? "";
+          }
+
+          if (line === original) {
+            flush();
+            options.output.write(` ${line}\n`);
+          } else {
+            push(original, line);
+          }
+        });
+        flush();
+      } else {
+        for (const line of lines) {
+          options.output.write(line + "\n");
+        }
+      }
+    });
 }
 
-const args = process.argv.slice(2)
-const lineRules = []
-const documentRules = []
-for (const arg of args) {
-  const parsed = parseRuleArgs(arg)
-  let lineRule, documentRule
-  if (lineRule = toLineRule(parsed)) {
-    if (documentRules.length) {
-      throw new Error('Document rules are only supported *after* all the line rules (use multiple ssed pipes I guess?)')
-    }
-
-    lineRules.push(lineRule)
-  } else if (documentRule = toDocumentRule(parsed)) {
-    documentRules.push(documentRule)
-  } else {
-    throw new Error(`Invalid rule: ${arg}`)
-  }
+try {
+  // remove 'node' and 'ssed' from argv
+  main(process.argv.slice(2));
+} catch (e) {
+  process.stderr.write(`ssed: ${e.message}\n`);
 }
 
-const stdin = lineStream(process.stdin)
-let lines = []
-stdin.on('line', line => {
-  for (const lineRule of lineRules) {
-    line = lineRule(line)
-    if (line === undefined) {
-      return
-    }
-  }
-  if (documentRules.length) {
-    lines.push(line)
-  } else {
-    process.stdout.write(line + "\n")
-  }
-}).on('end', () => {
-  if (documentRules.length === 0) {
-    return
+function ansi(code, input) {
+  return `\x1b[${code}m${input}\x1b[0m`;
+}
+
+function red(input, enabled) {
+  return enabled ? ansi('1;31', input) : input;
+}
+
+function green(input, enabled) {
+  return enabled ? ansi('1;32', input) : input;
+}
+
+function yellow(input, enabled) {
+  return enabled ? ansi('38;5;227', input) : input;
+}
+
+function escapeShell(arg) {
+  if (arg.match(/[;]/)) {
+    return '"' + arg.replaceAll('"', '\\"') + '"';
   }
 
-  for (const documentRule of documentRules) {
-    lines = documentRule(lines)
-    if (!lines?.length) {
-      return
-    }
-  }
-  process.stdout.write(lines.join("\n"))
-});
+  return arg;
+}
