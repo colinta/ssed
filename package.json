@@ -1,13 +1,15 @@
 {
   "name": "ssed",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Fed up with trying to remember sed's weird regex support? Me, too.",
   "main": "ssed",
   "directories": {
     "lib": "lib",
     "test": "test"
   },
-  "bin": { "ssed": "./ssed" },
+  "bin": {
+    "ssed": "./ssed"
+  },
   "dependencies": {},
   "devDependencies": {},
   "scripts": {},

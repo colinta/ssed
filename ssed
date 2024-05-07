@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const fs = require("fs");
+const inspect = require("util").inspect;
 const EventEmitter = require("events");
 
 function toDelim(delim) {
@@ -48,11 +49,29 @@ function parseRuleArgs(rule) {
     .map(unescape);
   const [match, replace] = args;
 
-  return [cmd, match, replace, args];
+  return [cmd, match, replace, args, delim];
 }
 
-function toLineRule([cmd, match, replace], state) {
+function toLineRule([cmd, match, replace, _, delim], state) {
   if (cmd === "sub" || cmd === "s") {
+    if (delim === ":") {
+      // this
+      // is
+      // text | sub:1:that => that
+      //                      is
+      //                      text
+      const ranges = toLineRanges(match);
+      return (line, lineNo) => {
+        if (
+          ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo)
+        ) {
+          return replace;
+        }
+
+        return line;
+      };
+    }
+
     // this is text | sub/this/that => that is text
     // this is text | s|this|that => that is text
     const regex = new RegExp(match);
@@ -60,6 +79,10 @@ function toLineRule([cmd, match, replace], state) {
       return line.replace(regex, replace);
     };
   } else if (cmd === "gsub" || cmd === "g") {
+    if (delim === ":") {
+      throw Error("'gsub' does not support ':' delimiter");
+    }
+
     // this is text | sub/t/T => This is TexT
     // this is text | s|t|T => This is Text
     const regex = new RegExp(match, "g");
@@ -67,6 +90,22 @@ function toLineRule([cmd, match, replace], state) {
       return line.replace(regex, replace);
     };
   } else if (cmd === "take" || cmd === "t") {
+    if (delim === ":") {
+      // this
+      // is
+      // text | take:1:that => this
+      //
+      // same as print:
+      const ranges = toLineRanges(match);
+      return (line, lineNo) => {
+        if (
+          ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo)
+        ) {
+          return line;
+        }
+      };
+    }
+
     // this is text | take/t\w+ => this
     // this is text | t/t\w+ => this
     // how now      | take/t\w+ => how now
@@ -79,6 +118,24 @@ function toLineRule([cmd, match, replace], state) {
       return line;
     };
   } else if (cmd === "rm" || cmd === "r") {
+    if (delim === ":") {
+      // this
+      // is
+      // text | rm:1 => is
+      //                text
+      //
+      // same as kill:
+      const ranges = toLineRanges(match);
+      return (line, lineNo) => {
+        if (
+          ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo)
+        ) {
+          return;
+        }
+        return line;
+      };
+    }
+
     // this is text | rm/^\w+ is/ => text
     const regex = new RegExp(match);
     return (line) => {
@@ -98,14 +155,19 @@ function toLineRule([cmd, match, replace], state) {
     //                long
     //                2
     //                text
-    let check = (line) => true
-    if (match) {
+    let check = (_line, _lineNo) => true;
+    if (delim === ":") {
+      // turns 'on' at the line number match
+      const ranges = toLineRanges(match);
+      check = (_, lineNo) =>
+        ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo);
+    } else if (match) {
       const regex = new RegExp(match);
-      check = (line) => line.match(regex)
+      check = (line) => line.match(regex);
     }
 
-    return (line) => {
-      if (check(line) || state.printOn === true) {
+    return (line, lineNo) => {
+      if (check(line, lineNo) || state.printOn === true) {
         state.printOn = true;
         return line;
       }
@@ -120,14 +182,19 @@ function toLineRule([cmd, match, replace], state) {
     //                   long
     //                   2
     //                   text
-    let check = (line) => true
-    if (match) {
+    let check = (_line, _lineNo) => true;
+    if (delim === ":") {
+      // turns 'on' at the line number match
+      const ranges = toLineRanges(match);
+      check = (_, lineNo) =>
+        ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo);
+    } else if (match) {
       const regex = new RegExp(match);
-      check = (line) => line.match(regex)
+      check = (line) => line.match(regex);
     }
 
-    return (line) => {
-      if (check(line)) {
+    return (line, lineNo) => {
+      if (check(line, lineNo)) {
         state.printOn = true;
       } else if (state.printOn === true) {
         return line;
@@ -141,14 +208,19 @@ function toLineRule([cmd, match, replace], state) {
     // 2
     // text | after/1 off/2 => is
     //                         long
-    let check = (line) => true
-    if (match) {
+    let check = (_line, _lineNo) => true;
+    if (delim === ":") {
+      // turns 'on' at the line number match
+      const ranges = toLineRanges(match);
+      check = (_, lineNo) =>
+        ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo);
+    } else if (match) {
       const regex = new RegExp(match);
-      check = (line) => line.match(regex)
+      check = (line) => line.match(regex);
     }
 
-    return (line) => {
-      if (check(line)) {
+    return (line, lineNo) => {
+      if (check(line, lineNo)) {
         state.printOn = false;
       } else if (state.printOn === true) {
         return line;
@@ -170,6 +242,23 @@ function toLineRule([cmd, match, replace], state) {
       }
     };
   } else if (cmd === "print" || cmd === "p") {
+    if (delim === ":") {
+      // this
+      // is
+      // text | print:2-3 => is
+      //                     text
+      //
+      // same as take:
+      const ranges = toLineRanges(match);
+      return (line, lineNo) => {
+        if (
+          ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo)
+        ) {
+          return line;
+        }
+      };
+    }
+
     // this
     // is
     // text | p/^t => this
@@ -181,6 +270,24 @@ function toLineRule([cmd, match, replace], state) {
       }
     };
   } else if (cmd === "kill" || cmd === "k") {
+    if (delim === ":") {
+      // this
+      // is
+      // text | kill:1 => is
+      //                  text
+      //
+      // same as rm:
+      const ranges = toLineRanges(match);
+      return (line, lineNo) => {
+        if (
+          ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo)
+        ) {
+          return;
+        }
+        return line;
+      };
+    }
+
     // this
     // is
     // some
@@ -193,17 +300,21 @@ function toLineRule([cmd, match, replace], state) {
       }
     };
   } else if (cmd === "uniq" || cmd === "unique") {
+    if (delim === ':') {
+      throw Error("'uniq' does not support ':' delimiter");
+    }
+
     const lines = [];
-    let part = (line) => line
+    let part = (line) => line;
     if (match) {
       const regex = new RegExp(match);
-      part = (line) => line.match(regex)?.[0]
+      part = (line) => line.match(regex)?.[0];
     }
 
     return (line) => {
-      match = part(line)
+      match = part(line);
       if (match == null) {
-        return null
+        return null;
       }
 
       if (lines.indexOf(match) === -1) {
@@ -217,13 +328,39 @@ function toLineRule([cmd, match, replace], state) {
 function toDocumentRule([cmd, match, replace]) {
   if (cmd === "sort") {
     return (lines) => {
-      return lines.sort();
+      return lines.sort(([a], [b]) => a.localeCompare(b));
     };
   } else if (cmd === "reverse") {
     return (lines) => {
       return lines.reverse();
     };
+  } else if (cmd === "prefix") {
+    return (lines) => {
+      const max = lines.length;
+      return lines.map(([line, lineNo]) => {
+        let pad = " ".repeat(max.toString().length - lineNo.toString().length);
+        pad += lineNo.toString();
+        return [pad + ":" + line, lineNo];
+      });
+    };
   }
+}
+
+function toLineRanges(match) {
+  if (match.includes(",")) {
+    return match.split(",").flatMap((m) => toLineRanges(m));
+  }
+
+  if (match.includes("-")) {
+    const [start, stop] = match.split("-", 2).map(Number);
+    return [[start, stop + 1]];
+  }
+
+  if (match.endsWith("+")) {
+    return [[Number(match.slice(0, -1)), Infinity]];
+  }
+
+  return [[Number(match), Number(match) + 1]];
 }
 
 function lineStream(inputStream, transform = undefined) {
@@ -298,7 +435,7 @@ function parseOption(arg) {
   switch (option) {
     case "h":
     case "help": {
-      process.sterr.write(`usage: ssed [options] [rules]
+      process.stderr.write(`usage: ssed [options] [rules]
 
 Options:
   --diff                       Only show differences
@@ -505,12 +642,6 @@ function main(args) {
 
     let lineRule, documentRule;
     if ((lineRule = toLineRule(parsed, state))) {
-      if (documentRules.length) {
-        throw Error(
-          "Document rules are only supported *after* all the line rules (use multiple ssed pipes I guess?)",
-        );
-      }
-
       lineRules.push(lineRule);
     } else if ((documentRule = toDocumentRule(parsed))) {
       documentRules.push(documentRule);
@@ -522,12 +653,14 @@ function main(args) {
   const inputStream = lineStream(options.input);
   const originalLines = [];
   let lines = [];
+  let lineNo = 0;
   return inputStream
     .on("line", (line) => {
       const original = line;
+      lineNo += 1;
 
       for (const lineRule of lineRules) {
-        line = lineRule(line);
+        line = lineRule(line, lineNo);
         if (line == null) {
           break;
         }
@@ -536,7 +669,7 @@ function main(args) {
       originalLines.push([original, line ?? ""]);
 
       if (line != null) {
-        lines.push(line);
+        lines.push([line, lineNo]);
       }
     })
     .on("end", (keepOpen, close) => {
@@ -546,6 +679,8 @@ function main(args) {
           break;
         }
       }
+
+      lines = lines.map(([line]) => line);
 
       if (options.diff) {
         let lineRun = {
