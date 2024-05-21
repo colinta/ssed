@@ -36,9 +36,9 @@ function unescape(str) {
 }
 
 function parseRuleArgs(rule) {
-  const command = rule.match(/^(\w+\b|\d+)(.)/);
+  const command = rule.match(/^(\w+\b|\d+|!p(?:rint)?)(.)/);
   if (!command) {
-    const [simpleCommand] = rule.match(/^(\w+\b|\d+)$/) ?? [];
+    const [simpleCommand] = rule.match(/^(\w+\b|\d+|!p(?:rint)?)$/) ?? [];
     if (!simpleCommand) {
       throw Error(`Invalid: ${rule}`);
     }
@@ -275,7 +275,7 @@ function toLineRule([cmd, match, replace, _, delim], state) {
         return line;
       }
     };
-  } else if (cmd === "kill" || cmd === "k") {
+  } else if (cmd === "kill" || cmd === "k" || cmd === "!p" || cmd === "!print") {
     if (delim === ":") {
       // this
       // is
