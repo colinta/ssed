@@ -7,12 +7,15 @@ function toDelim(delim) {
   if (delim === "{" || delim === "}") {
     return /[\{\}]/;
   }
+
   if (delim === "[" || delim === "]") {
     return /[\[\]]/;
   }
+
   if (delim === "(" || delim === ")") {
     return /[\(\)]/;
   }
+
   if (delim === "<" || delim === ">") {
     return /[<>]/;
   }
@@ -49,7 +52,7 @@ function parseRuleArgs(rule) {
     .map(unescape);
   const [match, replace] = args;
 
-  return [cmd, match, replace, args, delim];
+  return [cmd, (match ?? ''), (replace ?? ''), args, delim];
 }
 
 function toLineRule([cmd, match, replace, _, delim], state) {
@@ -227,6 +230,9 @@ function toLineRule([cmd, match, replace, _, delim], state) {
       }
     };
   } else if (cmd.match(/^\d+$/)) {
+    if (delim === ":") {
+      throw Error("'gsub' does not support ':' delimiter");
+    }
     // this is text | 1/\w(\w+)$ => ext
     // this is text | 2/(\w+) (\w+) (\w+) => is
     const index = parseInt(cmd);
@@ -340,7 +346,7 @@ function toDocumentRule([cmd, match, replace]) {
       return lines.map(([line, lineNo]) => {
         let pad = " ".repeat(max.toString().length - lineNo.toString().length);
         pad += lineNo.toString();
-        return [pad + ":" + line, lineNo];
+        return [pad + match + ":" + replace + line, lineNo];
       });
     };
   }
@@ -439,16 +445,26 @@ function parseOption(arg) {
 
 Options:
   --diff                       Only show differences
+  --no-diff                    Do not show differences
+
   --color                      Enable ANSI colors (true if stdout is a TTY)
+  --no-color                   Disable ANSI colors
+
   --input                      Take file names from standard input (\`ls | ssed --input\`)
   --input=fromfile             Use 'fromfile' as input
   --input=fromfile1,fromfile2  Run against multiple files.
+
   --write                      Write each changed file in place.
   --write=tofile               Provide a destination file name.
   --write=to\${file}           \${file} is replaced with the input file.
   --write=\${}.backup          \${} is replaced with the input file.
+  --no-write                   Do not write each changed file in place.
+
   --interactive                Ask before writing the file
+  --no-interactive             Do not ask before writing the file
+
   --dry-run (-n)               Show which files would be affected.
+  --no-dry-run                 Do not show which files would be affected.
 
 Line Rules
 ----------
@@ -464,8 +480,10 @@ Line rules operate on every line. Commands 'on', 'after' and 'off' share the on/
   f/pattern (aka off/…)            Turn printing off on the line where 'pattern' is matched
   p/pattern (aka print/…)          Only print lines that match 'pattern'
   k/pattern (aka kill/…)           Do not print lines that match 'pattern'
+  !p/pattern (aka !print/…)        Alias for k/kill because I can't remember one (k) and always remember the other (p)
+
   uniq (aka unique)                Only print unique lines
-  uniq/pattern                     Only print matching lines, and only unique matches
+  uniq/pattern                     Only print matching lines, and only unique matches (uniqueness is determined by the matching regex)
 
 Document Rules:
   sort
@@ -476,6 +494,23 @@ Separators:
   s/foo/bar/
   s|foo|bar
   s{foo}bar
+
+Line Number rules
+-----------------
+Using the special delimiter ':' you can apply most rules on line numbers instead of line content.
+
+For example
+  s:1:replace                      Replaces line 1 with the word "replace"
+  p:1                              Only print line 1
+
+Not all rules support this feature, but typically any rule that _could_ support it, _does_
+
+Line numbers can be expressed as a comma-separated list, ranges are supported, as is the open range.
+  p:1                              Only matches the line number (only matches line 1)
+  p:9+                             Matches the line and all subsequent numbers (lines 9 and onward)
+  p:1,3,5                          Matches the listed line numbers (and only these)
+  p:1-5                            Matches the range of number, inclusive (1,2,3,4,5)
+  p:1-5,10-15,20,30+               Ranges and single lines can be mixed and matched
 `);
       process.exit(0);
     }

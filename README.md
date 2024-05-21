@@ -11,13 +11,18 @@ _JavaScript_ has a more sensible implementation, you know you have troubles.
 
 ## Usage
 
-    > commands | ssed
+    > ssed --help
+    > something | ssed [commands]
 
 All commands use a "g/re/p"-like syntax:
 
     cmd/match[/replace]
 
 All rules are run on every line, the output of one is fed into the next. If any step filters the line, the rest of the rules are skipped and the next line is processed.
+
+Most commands can alternatively work on _line numbers_ instead of a regex match
+
+    cat file | ssed print:1-5,10+   #  prints lines 1-5, also line 10 until the end of the file
 
 ###### Substitute
     sub/pattern/replace
@@ -169,4 +174,4 @@ Bracket delimiters “work”, but they don't have to actually _match_, e.g. the
 
 ###### As-is
 
-I offer this up as-is. I'm happy to discuss PRs and bug fixes, but feature requests will be summarily closed. Who has time for lazy programmers in <?= date('Y') %>!?
+I offer this up as-is. I'm happy to discuss PRs and bug fixes, but feature requests (as in "Why doesn't it…" or "Can you implement…") might be summarily closed with not so much as a by-your-leave. If you want it, write it yourself, this is some scrappy, easy JavaScript. Who has time for lazy programmers in <?= date('Y') %>!?
