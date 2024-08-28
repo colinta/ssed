@@ -52,321 +52,639 @@ function parseRuleArgs(rule) {
     .map(unescape);
   const [match, replace] = args;
 
-  return [cmd, (match ?? ''), (replace ?? ''), args, delim];
+  return [cmd.toLowerCase(), match ?? "", replace ?? "", args, delim];
 }
 
-function toLineRule([cmd, match, replace, _, delim], state) {
-  if (cmd === "sub" || cmd === "s") {
-    if (delim === ":") {
-      // this
-      // is
-      // text | sub:1:that => that
-      //                      is
-      //                      text
-      const ranges = toLineRanges(match);
-      return (line, lineNo) => {
-        if (
-          ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo)
-        ) {
-          return replace;
-        }
+function resetState() {
+  return {
+    // line-commands `on`, `after`, and `off` all share this value; toggles printing on/off
+    printOn: null,
+  };
+}
 
-        return line;
-      };
-    }
+/**
+ * Performs a single substitution on the line. Use gsub to replace every instance.
+ *
+ * When matching line numbers, the entire line is replaced with the matching text.
+ *
+ * Usage:
+ *     ssed sub/{pattern}
+ *     ssed sub:{line-number}
+ *
+ * Aliases:
+ *     ssed s/{pattern}
+ *
+ * @example using regex
+ *     this is text | sub/this/that => that is text
+ *
+ * @example Using line numbers
+ *     this
+ *     is
+ *     text | sub:1:that => that
+ *                          is
+ *                          text
+*/
+function substitutionRule(delim, match, replace) {
+  if (delim === ":") {
+    const lineRangeTest = toLineRangeTest(match);
 
-    // this is text | sub/this/that => that is text
-    // this is text | s|this|that => that is text
-    const regex = new RegExp(match);
-    return (line) => {
-      return line.replace(regex, replace);
-    };
-  } else if (cmd === "gsub" || cmd === "g") {
-    if (delim === ":") {
-      throw Error("'gsub' does not support ':' delimiter");
-    }
-
-    // this is text | sub/t/T => This is TexT
-    // this is text | s|t|T => This is Text
-    const regex = new RegExp(match, "g");
-    return (line) => {
-      return line.replace(regex, replace);
-    };
-  } else if (cmd === "take" || cmd === "t") {
-    if (delim === ":") {
-      // this
-      // is
-      // text | take:1:that => this
-      //
-      // same as print:
-      const ranges = toLineRanges(match);
-      return (line, lineNo) => {
-        if (
-          ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo)
-        ) {
-          return line;
-        }
-      };
-    }
-
-    // this is text | take/t\w+ => this
-    // this is text | t/t\w+ => this
-    // how now      | take/t\w+ => how now
-    const regex = new RegExp(match);
-    return (line) => {
-      const match = line.match(regex);
-      if (match && match[0]) {
-        return match[0];
+    return (line, lineNo) => {
+      if (lineRangeTest(lineNo)) {
+        return replace;
       }
+
       return line;
     };
-  } else if (cmd === "rm" || cmd === "r") {
-    if (delim === ":") {
-      // this
-      // is
-      // text | rm:1 => is
-      //                text
-      //
-      // same as kill:
-      const ranges = toLineRanges(match);
-      return (line, lineNo) => {
-        if (
-          ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo)
-        ) {
-          return;
-        }
-        return line;
-      };
-    }
+  }
 
-    // this is text | rm/^\w+ is/ => text
-    const regex = new RegExp(match);
-    return (line) => {
-      if (line.match(regex)) {
-        return line.replace(regex, "");
+  const regex = new RegExp(match);
+  return (line) => line.replace(regex, replace);
+}
+
+/**
+ * Replaces every match with the substitution.
+ *
+ * Does not support line numbers.
+ *
+ * Usage:
+ *     ssed gsub/{pattern}
+ *
+ * Aliases:
+ *     ssed g/{pattern}
+ *
+ * @example Using regex
+ *     this is text | sub/t/T => This is TexT
+ *     this is text | s|t|T => This is Text
+ */
+function globalSubstitutionRule(delim, match, replace) {
+  if (delim === ":") {
+    throw Error(`'gsub' does not support '${delim}' delimiter`);
+  }
+
+  const regex = new RegExp(match, "g");
+  return (line) => line.replace(regex, replace);
+}
+
+/**
+ * Only print the matching part of the line, or print the entire line if 'pattern'
+ * doesn't match.
+ *
+ * When matching line numbers, only the matching lines are printed (this works
+ * identically to the 'print' command)
+ *
+ * Usage:
+ *     ssed take/{pattern}
+ *     ssed take:{line-number}
+ *
+ * Aliases:
+ *     ssed t/{pattern}
+ *
+ * @example Using regex
+ *     this is text | take/t\w+ => this
+ *     this is text | t/t\w+ => this
+ *     how now      | take/t\w+ => how now
+ *
+ * @example Using line numbers
+ *     this
+ *     is
+ *     text | take:1 => this
+ */
+function takeRule(delim, match) {
+  if (delim === ":") {
+    const lineRangeTest = toLineRangeTest(match);
+
+    return (line, lineNo) => {
+      if (lineRangeTest(lineNo)) {
+        return line;
       }
+    };
+  }
+
+  const regex = new RegExp(match);
+  return (line) => {
+    const match = line.match(regex);
+    return match ? match[0] : line;
+  };
+}
+
+/**
+ * Removes the matching part of the line, or print the entire line if 'pattern'
+ * doesn't match.
+ *
+ * When matching line numbers, only the matching lines are removed (this works
+ * identically to the 'kill' command)
+ *
+ * Usage:
+ *     ssed rm/{pattern}
+ *     ssed rm:{line-number}
+ *
+ * Aliases:
+ *     ssed r/{pattern}
+ *
+ * @example Using regex
+ *     this is text | rm/^\w+ is/ => text
+ *
+ * @example Using line numbers
+ *     this
+ *     is
+ *     text | rm:1 => is
+ *                    text
+ */
+function removeRule(delim, match) {
+  if (delim === ":") {
+    const lineRangeTest = toLineRangeTest(match);
+
+    return (line, lineNo) => {
+      if (lineRangeTest(lineNo)) {
+        return;
+      }
+
       return line;
     };
-  } else if (cmd === "on" || cmd === "o") {
-    // this
-    // 1
-    // is
-    // long
-    // 2
-    // text | on/1 => 1
-    //                is
-    //                long
-    //                2
-    //                text
-    let check = (_line, _lineNo) => true;
-    if (delim === ":") {
-      // turns 'on' at the line number match
-      const ranges = toLineRanges(match);
-      check = (_, lineNo) =>
-        ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo);
-    } else if (match) {
-      const regex = new RegExp(match);
-      check = (line) => line.match(regex);
-    }
+  }
+
+  const regex = new RegExp(match);
+  return (line) => line.replace(regex, "");
+}
+
+/**
+ * Only print lines that match 'pattern'.
+ *
+ * When matching line numbers, only the matching lines are printed. This works
+ * identically to the 'take' command.
+ *
+ * Usage:
+ *     ssed print/{pattern}
+ *     ssed print:{line-number}
+ *
+ * Aliases:
+ *     ssed p/{pattern}
+ *
+ * @example Using regex
+ *     this
+ *     is
+ *     text | p/^t => this
+ *                    text
+ *
+ * @example Using line numbers
+ *     this
+ *     is
+ *     text | print:2-3 => is
+ *                         text
+ */
+function printRule(delim, match) {
+  if (delim === ":") {
+    const lineRangeTest = toLineRangeTest(match);
 
     return (line, lineNo) => {
-      if (check(line, lineNo) || state.printOn === true) {
-        state.printOn = true;
+      if (lineRangeTest(lineNo)) {
         return line;
       }
     };
-  } else if (cmd === "after" || cmd === "a") {
-    // this
-    // 1
-    // is
-    // long
-    // 2
-    // text | after/1 => is
-    //                   long
-    //                   2
-    //                   text
-    let check = (_line, _lineNo) => true;
-    if (delim === ":") {
-      // turns 'on' at the line number match
-      const ranges = toLineRanges(match);
-      check = (_, lineNo) =>
-        ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo);
-    } else if (match) {
-      const regex = new RegExp(match);
-      check = (line) => line.match(regex);
-    }
+  }
+
+  const regex = new RegExp(match);
+  return (line) => (line.match(regex) ? line : undefined);
+}
+
+/**
+ * Removes lines that match the pattern. Inverse of "print".
+ *
+ * Usage:
+ *    ssed kill/{pattern}
+ *    ssed kill:{line-number}
+ *
+ * Aliases:
+ *    ssed k/{pattern}
+ *    ssed !p/{pattern}
+ *    ssed !print/{pattern}
+ *
+ * When matching line numbers, the matching lines are removed.
+ *
+ * @example Using regex
+ *     this
+ *     is
+ *     some
+ *     text | k/is => some
+ *                    text
+ *
+ * @example Using line numbers
+ *     this
+ *     is
+ *     text | kill:1 => is
+ *                      text
+ */
+function killRule(delim, match) {
+  if (delim === ":") {
+    const lineRangeTest = toLineRangeTest(match);
 
     return (line, lineNo) => {
-      if (check(line, lineNo)) {
-        state.printOn = true;
-      } else if (state.printOn === true) {
-        return line;
+      if (lineRangeTest(lineNo)) {
+        return;
       }
-    };
-  } else if (cmd === "off" || cmd === "f") {
-    // this
-    // 1
-    // is
-    // long
-    // 2
-    // text | after/1 off/2 => is
-    //                         long
-    let check = (_line, _lineNo) => true;
-    if (delim === ":") {
-      // turns 'on' at the line number match
-      const ranges = toLineRanges(match);
-      check = (_, lineNo) =>
-        ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo);
-    } else if (match) {
-      const regex = new RegExp(match);
-      check = (line) => line.match(regex);
-    }
 
-    return (line, lineNo) => {
-      if (check(line, lineNo)) {
-        state.printOn = false;
-      } else if (state.printOn === true) {
-        return line;
-      }
+      return line;
     };
-  } else if (cmd.match(/^\d+$/)) {
-    if (delim === ":") {
-      throw Error("'gsub' does not support ':' delimiter");
-    }
-    // this is text | 1/\w(\w+)$ => ext
-    // this is text | 2/(\w+) (\w+) (\w+) => is
-    const index = parseInt(cmd);
+  }
+
+  const regex = new RegExp(match);
+  return (line) => (line.match(regex) ? undefined : line);
+}
+
+/**
+ * Only prints unique lines. Default behaviour matches the entire line, but you can
+ * specify a regular expression to only match part of the line. If the line doesn't
+ * match, it isn't printed.
+ *
+ * Does not support line-numbers.
+ *
+ * Usage:
+ *    ssed unique
+ *    ssed unique/{pattern}
+ *
+ * Aliases:
+ *    ssed uniq
+ *
+ * @example
+ *     alice
+ *     alice
+ *     bob
+ *     bob | uniq => alice
+ *                   bob
+ *
+ * @example Using regex
+ *     who is alice?
+ *     what is alice?
+ *     I don't know.
+ *     do you know bob?
+ *     does anyone know bob? | uniq/\w+\? => who is alice?
+ *                                           do you know bob?
+ */
+function uniqueRule(delim, match) {
+  if (delim === ":") {
+    throw Error(`'uniq' does not support '${delim}' delimiter`);
+  }
+
+  const lines = new Set();
+  let part = (line) => line;
+  if (match) {
     const regex = new RegExp(match);
-    return (line) => {
-      const match = line.match(regex);
-      if (match) {
-        if (match[index]) {
-          return match[index];
-        }
-      } else {
-        return line;
-      }
-    };
-  } else if (cmd === "print" || cmd === "p") {
-    if (delim === ":") {
-      // this
-      // is
-      // text | print:2-3 => is
-      //                     text
-      //
-      // same as take:
-      const ranges = toLineRanges(match);
-      return (line, lineNo) => {
-        if (
-          ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo)
-        ) {
-          return line;
-        }
-      };
+    part = (line) => line.match(regex)?.[0];
+  }
+
+  return (line) => {
+    const match = part(line);
+    if (match == null) {
+      return null;
     }
 
-    // this
-    // is
-    // text | p/^t => this
-    //                text
+    if (lines.has(match)) {
+      lines.add(match);
+      return line;
+    }
+  };
+}
+
+/**
+ * Trims whitespace from the line. Defaults to trimming whitespace on both sides,
+ * but 'left' or 'right' can be specified to only trim on one side.
+ *
+ * Usage:
+ *    ssed trim
+ *    ssed trim:left
+ *    ssed trim:right
+ *
+ * @example '|' indicates start and end of line
+ *     |     line 1|
+ *     |line 2     |
+ *     |   line 3  | ssed trim => |line 1|
+ *                                |line 2|
+ *                                |line 3|
+ *
+ * @example
+ *     |     line 1|
+ *     |line 2     |
+ *     |   line 3  | ssed trim:right => |     line 1|
+ *                                      |line 2|
+ *                                      |   line 3|
+ */
+function trimRule(delim, match) {
+  let trim = (line) => line.trim();
+  if (match == "left") {
+    trim = (line) => line.replace(/^\s+/, "");
+  } else if (match == "right") {
+    trim = (line) => line.replace(/\s+$/, "");
+  } else if (match) {
+    // error
+    throw Error(`Invalid: trim${delim}${match}`);
+  }
+
+  return (line) => {
+    return trim(line)
+  };
+}
+
+/**
+ * Prepends (prefix) each line with text.
+ *
+ * Usage:
+ *    ssed prepend/{text}
+ *
+ * Aliases:
+ *    ssed prefix/{text}
+ *
+ * @example
+ *     1
+ *     2
+ *     3
+ *     4 | prepend:'line ' => line 1
+ *                            line 2
+ *                            line 3
+ *                            line 4
+ */
+function prependRule(prependText) {
+  return surroundRule(prependText, '');
+}
+
+/**
+ * Append (suffix) each line with text.
+ *
+ * Usage:
+ *    ssed append/{text}
+ *
+ * Aliases:
+ *    ssed suffix/{text}
+ *
+ * @example
+ *     1
+ *     2
+ *     3
+ *     4 | append:' foo' => 1 foo
+ *                          2 foo
+ *                          3 foo
+ *                          4 foo
+ */
+function appendRule(appendText) {
+  return surroundRule('', appendText);
+}
+
+/**
+ * Surround each line with text.
+ *
+ * Usage:
+ *    ssed surround/{prepend}/{append}
+ *
+ * @example
+ *     1
+ *     2
+ *     3
+ *     4 | 'surround:->:<-' => ->1<-
+ *                             ->2<-
+ *                             ->3<-
+ *                             ->4<-
+ */
+function surroundRule(prepend, append) {
+  return (line) => {
+    return prepend + line + append;
+  };
+}
+
+/**
+ * Commands to turn printing on and off based on a pattern or line number.
+ *
+ * on: turn printing on at the matching line
+ * after: turn printing on after the matching line
+ * off: turn printing off at the matching line
+ *
+ * Usage:
+ *    ssed on/{pattern}
+ *    ssed on:{line-number}
+ *    ssed after/{pattern}
+ *    ssed off/{pattern}
+ *
+ * @example
+ *     a
+ *     b
+ *     c
+ *     d
+ *     e
+ *     f
+ *     g | on/b off/d after/f => b   # starts "off", is turned on by matching 'b'
+ *                               c   # still "on", turned off by matching 'd'
+ *                               g   # off until 'f', then turned on starting at next line
+ */
+function controlPrintingRule(cmd, delim, match) {
+  let check = (_line, _lineNo) => true;
+  if (delim === ":") {
+    const lineRangeTest = toLineRangeTest(match);
+    check = (_, lineNo) => lineRangeTest(lineNo);
+  } else if (match) {
     const regex = new RegExp(match);
-    return (line) => {
-      if (line.match(regex)) {
-        return line;
+    check = (line) => line.match(regex);
+  }
+
+  return (line, lineNo, state) => {
+    if (cmd === "on" && (state.printOn || check(line, lineNo))) {
+      state.printOn = true;
+    } else if (cmd === "off" && check(line, lineNo)) {
+      state.printOn = false;
+    }
+
+    if (state.printOn) {
+      return line;
+    }
+
+    if (cmd === "after" && check(line, lineNo)) {
+      state.printOn = true;
+    }
+  };
+}
+
+/**
+ * Replaces the line with the nth group of the match.
+ *
+ * Does not support line-numbers.
+ *
+ * Usage:
+ *    ssed 1/{pattern(group)}
+ *    ssed 2/{pattern(group1)(group2)}
+ *    ssed …/{pattern(…)}
+ *
+ * @example
+ *     text | 1/\w(\w+)$ => ext
+ *     this is text | 2/(\w+) (\w+) (\w+) => is
+ */
+function groupMatchRule(index, match, delim) {
+  if (delim === ":") {
+    throw Error(`'${index}' does not support '${delim}' delimiter`);
+  }
+
+  const regex = new RegExp(match);
+  return (line) => {
+    const match = line.match(regex);
+    return match && match[index] ? match[index] : line;
+  };
+}
+
+function toLineRule([cmd, match, replace, _, delim]) {
+  switch (cmd) {
+    case "sub":
+    case "s":
+      return substitutionRule(delim, match, replace);
+    case "gsub":
+    case "g":
+      return globalSubstitutionRule(delim, match, replace);
+    case "take":
+    case "t":
+      return takeRule(delim, match);
+    case "rm":
+    case "r":
+      return removeRule(delim, match);
+    case "print":
+    case "p":
+      return printRule(delim, match);
+    case "kill":
+    case "k":
+    case "!p":
+    case "!print":
+      return killRule(delim, match);
+    case "uniq":
+    case "unique":
+      return uniqueRule(delim, match);
+    case "trim":
+      return trimRule(delim, match);
+    case "prepend":
+    case "prefix":
+      return prependRule(match);
+    case "append":
+    case "suffix":
+      return appendRule(match);
+    case "surround":
+      return surroundRule(match, replace);
+    case "on":
+    case "off":
+    case "after":
+      return controlPrintingRule(cmd, delim, match);
+    default:
+      if (cmd.match(/^\d+$/)) {
+        const index = parseInt(cmd);
+        return groupMatchRule(index, match, delim);
       }
-    };
-  } else if (cmd === "kill" || cmd === "k" || cmd === "!p" || cmd === "!print") {
-    if (delim === ":") {
-      // this
-      // is
-      // text | kill:1 => is
-      //                  text
-      //
-      // same as rm:
-      const ranges = toLineRanges(match);
-      return (line, lineNo) => {
-        if (
-          ranges.some(([startNo, endNo]) => lineNo >= startNo && lineNo < endNo)
-        ) {
-          return;
+  }
+}
+
+function documentSortRule() {
+  return (lines) => {
+    return lines.sort(([a], [b]) => a.localeCompare(b));
+  };
+}
+
+function documentReverseRule() {
+  return (lines) => {
+    return lines.reverse();
+  };
+}
+
+function documentLineNumbersRule(match, replace) {
+  return (lines) => {
+    const max = lines.length;
+    return lines.map(([line, lineNo]) => {
+      let lineNoStr = lineNo.toString();
+      let pad = " ".repeat(max.toString().length - lineNoStr.length);
+      return [pad + lineNoStr + match + ":" + replace + line, lineNo];
+    });
+  };
+}
+
+function documentPrependRule(prependText) {
+  return documentSurroundRule(prependText, '')
+}
+
+function documentAppendRule(appendText) {
+  return documentSurroundRule('', appendText)
+}
+
+function documentSurroundRule(prependText, appendText) {
+  const prependLines = prependText == '' ? [] : prependText.split('\n')
+  const appendLines = appendText == '' ? [] : appendText.split('\n')
+
+  return (lines) => {
+    return prependLines.map((line, index) =>
+      [line, index + 1],
+    ).concat(lines.map(([line, lineNo]) => {
+      return [line, lineNo + linesLength];
+    }));
+  };
+}
+
+function documentLinesRule(lineRules) {
+  return (lines) => {
+    const state = resetState();
+
+    return lines.flatMap(([line, lineNo]) => {
+      for (const lineRule of lineRules) {
+        line = lineRule(line, lineNo, state);
+        if (line == null) {
+          return [];
         }
-        return line;
-      };
-    }
-
-    // this
-    // is
-    // some
-    // text | k/is => some
-    //                text
-    const regex = new RegExp(match);
-    return (line) => {
-      if (!line.match(regex)) {
-        return line;
-      }
-    };
-  } else if (cmd === "uniq" || cmd === "unique") {
-    if (delim === ':') {
-      throw Error("'uniq' does not support ':' delimiter");
-    }
-
-    const lines = [];
-    let part = (line) => line;
-    if (match) {
-      const regex = new RegExp(match);
-      part = (line) => line.match(regex)?.[0];
-    }
-
-    return (line) => {
-      match = part(line);
-      if (match == null) {
-        return null;
       }
 
-      if (lines.indexOf(match) === -1) {
-        lines.push(match);
-        return line;
-      }
-    };
+      return [[line, lineNo]];
+    })
   }
 }
 
 function toDocumentRule([cmd, match, replace]) {
   if (cmd === "sort") {
-    return (lines) => {
-      return lines.sort(([a], [b]) => a.localeCompare(b));
-    };
+    return documentSortRule()
   } else if (cmd === "reverse") {
-    return (lines) => {
-      return lines.reverse();
-    };
-  } else if (cmd === "prefix") {
-    return (lines) => {
-      const max = lines.length;
-      return lines.map(([line, lineNo]) => {
-        let pad = " ".repeat(max.toString().length - lineNo.toString().length);
-        pad += lineNo.toString();
-        return [pad + match + ":" + replace + line, lineNo];
-      });
-    };
+    return documentReverseRule();
+  } else if (cmd === "docprepend" || cmd === "docprefix") {
+    return documentPrependRule(match);
+  } else if (cmd === "docappend" || cmd === "docsuffix") {
+    return documentAppendRule(match);
+  } else if (cmd === "docsurround") {
+    return documentSurroundRule(match, replace);
+  } else if (cmd === "line" || cmd === "line-numbers") {
+    return documentLineNumbersRule(match, replace);
   }
 }
 
-function toLineRanges(match) {
+function toLineRangeTest(match) {
+  if (match === '*') {
+    return () => true;
+  }
+
   if (match.includes(",")) {
-    return match.split(",").flatMap((m) => toLineRanges(m));
+    const rules = match.split(",").map(rule => toLineRangeTest(rule));
+    return (lineNo) => rules.some(fn => fn(lineNo));
+  }
+
+  if (match.startsWith("%")) {
+    let modulus = match.slice(1);
+    if (modulus.includes("-")) {
+      const [mod, offset] = modulus.split("-", 2).map(Number)
+      return (lineNo) => ((lineNo + offset) % mod) === 0;
+    } else {
+      return (lineNo) => (lineNo % Number(modulus)) === 0;
+    }
   }
 
   if (match.includes("-")) {
-    const [start, stop] = match.split("-", 2).map(Number);
-    return [[start, stop + 1]];
+    const [start, stop] = match.split("-", 2).map((number, index) => {
+      if (number === '' && index === 0) {
+        return 1;
+      } else if (number === '' && index === 1) {
+        return Infinity;
+      } else {
+        return Number(number);
+      }
+    });
+
+    return (lineNo) => lineNo >= start && lineNo <= stop;
   }
 
-  if (match.endsWith("+")) {
-    return [[Number(match.slice(0, -1)), Infinity]];
-  }
-
-  return [[Number(match), Number(match) + 1]];
+  return (lineNo) => lineNo === Number(match)
 }
 
 function lineStream(inputStream, transform = undefined) {
@@ -481,13 +799,17 @@ Line rules operate on every line. Commands 'on', 'after' and 'off' share the on/
   p/pattern (aka print/…)          Only print lines that match 'pattern'
   k/pattern (aka kill/…)           Do not print lines that match 'pattern'
   !p/pattern (aka !print/…)        Alias for k/kill because I can't remember one (k) and always remember the other (p)
+  prepend/text  append/text  surround/prefix/suffix
+                                   Adds text to the beginning or end of the line
 
   uniq (aka unique)                Only print unique lines
   uniq/pattern                     Only print matching lines, and only unique matches (uniqueness is determined by the matching regex)
 
 Document Rules:
-  sort
-  reverse
+  sort                                Sort the lines (alphabettically using localeCompare)
+  reverse                             Obvious
+  line                                Prepend each line with the line number
+  docPrepend, docAppend, docSurround  Prepend, append, or surround the document (add header/footer)
 
 Separators:
   s/foo/bar
@@ -505,11 +827,14 @@ For example
 
 Not all rules support this feature, but typically any rule that _could_ support it, _does_
 
-Line numbers can be expressed as a comma-separated list, ranges are supported, as is the open range.
+Line numbers can be expressed as a single number, a range, an open range, a modulo operation, and a comma-separated list of rules
   p:1                              Only matches the line number (only matches line 1)
-  p:9+                             Matches the line and all subsequent numbers (lines 9 and onward)
+  p:%2                             Matches lines that are modulo-N (even lines)
+  p:%2-1                           Matches lines that are modulo-N minus Y (odd lines)
   p:1,3,5                          Matches the listed line numbers (and only these)
   p:1-5                            Matches the range of number, inclusive (1,2,3,4,5)
+  p:9-                             Matches the line number and all subsequent lines (lines 9 and onward)
+  p:-9                             Matches lines up to and including the line number (lines 1-9)
   p:1-5,10-15,20,30+               Ranges and single lines can be mixed and matched
 `);
       process.exit(0);
@@ -602,12 +927,8 @@ function main(args) {
     },
   };
 
-  const lineRules = [];
+  let lineRules = [];
   const documentRules = [];
-  const state = {
-    // line-commands `on`, `after`, and `off` all share this value; toggles printing on/off
-    printOn: null,
-  };
 
   const rules = [];
   for (const arg of args) {
@@ -676,26 +997,47 @@ function main(args) {
     const parsed = parseRuleArgs(rule);
 
     let lineRule, documentRule;
-    if ((lineRule = toLineRule(parsed, state))) {
+    if ((lineRule = toLineRule(parsed))) {
       lineRules.push(lineRule);
     } else if ((documentRule = toDocumentRule(parsed))) {
+      if (lineRules.length) {
+        documentRules.push(documentLinesRule(lineRules));
+        lineRules = [];
+      }
+
       documentRules.push(documentRule);
     } else {
       throw Error(`Invalid rule: ${rule}`);
     }
   }
 
+  if (lineRules.length && documentRules.length) {
+    documentRules.push(documentLinesRule(lineRules));
+    lineRules = [];
+  }
+
   const inputStream = lineStream(options.input);
   const originalLines = [];
   let lines = [];
   let lineNo = 0;
+
+  // if (
+  //   we only have line rules,
+  //   no document rules,
+  //   and we're not diffing the output
+  // ), then: we perform a "stream edit".
+  //
+  // 1. create a state for the line rules
+  // 2. don't store the output in lines
+  // 3. output immediately
+  const state = resetState()
   return inputStream
     .on("line", (line) => {
       const original = line;
       lineNo += 1;
 
       for (const lineRule of lineRules) {
-        line = lineRule(line, lineNo);
+        line = lineRule(line, lineNo, state);
         if (line == null) {
           break;
         }
@@ -703,7 +1045,9 @@ function main(args) {
 
       originalLines.push([original, line ?? ""]);
 
-      if (line != null) {
+      if (!options.diff && documentRules.length === 0 && line != null) {
+        options.print(line);
+      } else if (line != null) {
         lines.push([line, lineNo]);
       }
     })
@@ -713,9 +1057,12 @@ function main(args) {
         if (!lines?.length) {
           break;
         }
+
+        // reset line numbers between documentRules
+        lines = lines.map(([line], index) => [line, index + 1]);
       }
 
-      lines = lines.map(([line]) => line);
+      lines = lines?.map(([line]) => line) ?? [];
 
       if (options.diff) {
         let lineRun = {
