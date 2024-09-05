@@ -597,23 +597,32 @@ function documentLineNumbersRule(match, replace) {
 }
 
 function documentPrependRule(prependText) {
-  return documentSurroundRule(prependText, '')
+  return documentSurroundRule(prependText, '');
 }
 
 function documentAppendRule(appendText) {
-  return documentSurroundRule('', appendText)
+  return documentSurroundRule('', appendText);
 }
 
 function documentSurroundRule(prependText, appendText) {
-  const prependLines = prependText == '' ? [] : prependText.split('\n')
-  const appendLines = appendText == '' ? [] : appendText.split('\n')
+  const prependLines = prependText == '' ? [] : prependText.split('\n');
+  const appendLines = appendText == '' ? [] : appendText.split('\n');
+  const prependLength = prependLines.length;
 
-  return (lines) => {
-    return prependLines.map((line, index) =>
-      [line, index + 1],
-    ).concat(lines.map(([line, lineNo]) => {
-      return [line, lineNo + linesLength];
-    }));
+  return lines => {
+    return prependLines
+      .map((line, index) => [line, index + 1])
+      .concat(
+        lines.map(([line, lineNo]) => {
+          return [line, prependLength + lineNo];
+        }),
+      )
+      .concat(
+        appendLines.map((line, index) => [
+          line,
+          prependLength + lines.length + index + 1,
+        ]),
+      );
   };
 }
 
