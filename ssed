@@ -626,6 +626,12 @@ function documentSurroundRule(prependText, appendText) {
   };
 }
 
+function documentJoinLinesRule(joiner) {
+  return lines => {
+    return [[lines.map(([line]) => line).join(joiner || ' ')]];
+  };
+}
+
 function documentLinesRule(lineRules) {
   return (lines) => {
     const state = resetState();
@@ -656,6 +662,8 @@ function toDocumentRule([cmd, match, replace]) {
     return documentSurroundRule(match, replace);
   } else if (cmd === "line" || cmd === "line-numbers") {
     return documentLineNumbersRule(match, replace);
+  } else if (cmd === 'join') {
+    return documentJoinLinesRule(match);
   }
 }
 
