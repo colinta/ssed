@@ -1071,6 +1071,8 @@ function main(args) {
   return inputStream
     .on('line', line => {
       const original = line
+      originalLines.push(original)
+
       lineNo += 1
 
       for (const lineRule of lineRules) {
@@ -1080,7 +1082,6 @@ function main(args) {
         }
       }
 
-      originalLines.push([original, line ?? ''])
 
       if (!options.diff && documentRules.length === 0 && line != null) {
         options.print(line)
@@ -1183,12 +1184,10 @@ function main(args) {
           }
         }
 
-        originalLines.forEach(([original, line], lineNumber) => {
-          if (documentRules.length) {
-            line = lines[lineNumber] ?? ''
-          }
+        originalLines.forEach((original, lineIndex) => {
+          const line = lines[lineIndex] ?? ''
 
-          push(original, line, lineNumber)
+          push(original, line, lineIndex)
         })
 
         flush(true)
