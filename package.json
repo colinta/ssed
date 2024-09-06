@@ -10,8 +10,6 @@
   "bin": {
     "ssed": "./ssed"
   },
-  "dependencies": {},
-  "devDependencies": {},
   "scripts": {},
   "repository": {
     "type": "git",
