@@ -1,152 +1,10 @@
 #!/usr/bin/env node
 const fs = require('fs')
-const inspect = require('util').inspect
 const EventEmitter = require('events')
 
-function toDelim(delim) {
-  if (delim === '{' || delim === '}') {
-    return /[\{\}]/
-  }
-
-  if (delim === '[' || delim === ']') {
-    return /[\[\]]/
-  }
-
-  if (delim === '(' || delim === ')') {
-    return /[\(\)]/
-  }
-
-  if (delim === '<' || delim === '>') {
-    return /[<>]/
-  }
-
-  return delim
-}
-
-function unescape(str) {
-  return str.replace(/\\(.)/g, (_, char) => {
-    if (char === 'n') {
-      return '\n'
-    }
-    if (char === 't') {
-      return '\t'
-    }
-    return `\\${char}`
-  })
-}
-
-function parseRuleArgs(rule) {
-  const command = rule.match(/^(\w+\b|\d+|!p(?:rint)?)(.)/)
-  if (!command) {
-    const [simpleCommand] = rule.match(/^(\w+\b|\d+|!p(?:rint)?)$/) ?? []
-    if (!simpleCommand) {
-      throw Error(`Invalid: ${rule}`)
-    }
-    return [simpleCommand, '', '', []]
-  }
-
-  const [cmd, delim] = [command[1], command[2]]
-  const [, ...args] = rule
-    .slice(delim.length)
-    .split(toDelim(delim))
-    .map(unescape)
-  const [pattern, replace] = args
-
-  return [cmd.toLowerCase(), pattern ?? '', replace ?? '', args, delim]
-}
-
-function help() {
-  process.stderr.write(`usage: ssed [options] [rules]
-
-Options:
-  --diff                       Only show differences
-  --no-diff                    Do not show differences
-
-  --color                      Enable ANSI colors (true if stdout is a TTY)
-  --no-color                   Disable ANSI colors
-
-  --input                      Take file names from standard input (\`ls | ssed --input\`)
-  --input=fromfile             Use 'fromfile' as input
-  --input=fromfile1,fromfile2  Run against multiple files.
-
-  --write                      Write each changed file in place.
-  --write=tofile               Provide a destination file name.
-  --write=%.backup             '\%' is replaced with the input file.
-  --no-write                   Do not write each changed file in place.
-
-  --interactive                Ask before writing the file
-  --no-interactive             Do not ask before writing the file
-
-  --dry-run (-n)               Show which files would be affected.
-  --no-dry-run                 Do not show which files would be affected.
-
-Line Rules
-----------
-Line rules operate on every line. Commands 'on', 'after' and 'off' share the on/off state.
-
-  s/search/replace (aka sub/…/…)   Replace the first instance of 'search' with 'replace'
-  g/search/replace (aka gsub/…/…)  Replace every instance of 'search' with 'replace'
-  t/pattern (aka take/…)           Only print the matching part of the line, or print the entire line if 'pattern' doesn't match
-  1/pattern                        Only print the first group of the match
-  r/pattern (aka rm/…)             Remove the matching part of the line, or print the entire line if 'pattern' doesn't match
-  o/pattern (aka on/…)             Start printing on the line where 'pattern' is matched
-  a/pattern (aka after/…)          Start printing on the line *after* 'pattern' is matched
-  f/pattern (aka off/…)            Turn printing off on the line where 'pattern' is matched
-  p/pattern (aka print/…)          Only print lines that match 'pattern'
-  k/pattern (aka kill/…)           Do not print lines that match 'pattern'
-  !p/pattern (aka !print/…)        Alias for k/kill because I can't remember one (k) and always remember the other (p)
-  prepend/text  append/text  surround/prefix/suffix
-                                   Adds text to the beginning or end of the line
-
-  uniq (aka unique)                Only print unique lines
-  uniq/pattern                     Only print matching lines, and only unique matches (uniqueness is determined by the matching regex)
-
-Document Rules:
-  sort  sort/pattern                  Sort the lines alphabettically using localeCompare. If a pattern is provided, that part of the line will be used.
-  sortn                               Sort the lines numerically (tries to be smart about scanning number)
-  reverse                             Obvious
-  line                                Prepend each line with the line number
-  docPrepend, docAppend, docSurround  Prepend, append, or surround the document (add header/footer)
-  join  join/separator                Join lines with a space (or optional separator)
-
-Separators:
-  s/foo/bar
-  s/foo/bar/
-  s|foo|bar
-  s{foo}bar
-
-Line Number rules
------------------
-Using the special delimiter ':' you can apply most rules on line numbers instead of line content.
-
-For example
-  s:1:replace                      Replaces line 1 with the word "replace"
-  p:1                              Only print line 1
-
-Not all rules support this feature, but typically any rule that _could_ support it, _does_
-
-Line numbers can be expressed as a single number, a range, an open range, a modulo operation, and a comma-separated list of rules
-  p:1                              Only matches the line number (only matches line 1)
-  p:%2                             Matches lines that are modulo-N (even lines)
-  p:%2-1                           Matches lines that are modulo-N minus Y (odd lines)
-  p:1,3,5                          Matches the listed line numbers (and only these)
-  p:1-5                            Matches the range of number, inclusive (1,2,3,4,5)
-  p:9-                             Matches the line number and all subsequent lines (lines 9 and onward)
-  p:-9                             Matches lines up to and including the line number (lines 1-9)
-  p:1-5,10-15,20,30+               Ranges and single lines can be mixed and matched
-
-`)
-}
-
-function resetState() {
-  return {
-    // line-commands `on`, `after`, and `off` all share this value; toggles printing on/off
-    printOn: null,
-  }
-}
-
 /**
- * Performs a single substitution on the line. Use gsub to replace every instance.
+ * Performs a single substitution on every line that matches. Use gsub to replace
+ * multiple substitutions perline.
  *
  * When matching line numbers, the entire line is replaced with the matching text.
  *
@@ -462,9 +320,7 @@ function trimRule(delim, pattern) {
     throw Error(`Invalid: trim${delim}${pattern}`)
   }
 
-  return line => {
-    return trim(line)
-  }
+  return line => trim(line)
 }
 
 /**
@@ -527,23 +383,23 @@ function appendRule(appendText) {
  *                             ->4<-
  */
 function surroundRule(prepend, append) {
-  return line => {
-    return prepend + line + append
-  }
+  return line => prepend + line + append
 }
 
 /**
  * Commands to turn printing on and off based on a pattern or line number.
  *
- * on: turn printing on at the matching line
- * after: turn printing on after the matching line
- * off: turn printing off at the matching line
+ * on:     turn printing on at the matching line
+ * after:  turn printing on after the matching line
+ * off:    turn printing off at the matching line
+ * toggle: printing starts on, toggles on matching lines
  *
  * Usage:
  *    ssed on/{pattern}
  *    ssed on:{line-number}
  *    ssed after/{pattern}
  *    ssed off/{pattern}
+ *    ssed toggle/{pattern}
  *
  * @example
  *     a
@@ -563,23 +419,57 @@ function controlPrintingRule(cmd, delim, pattern) {
     check = (_, lineNo) => lineRangeTest(lineNo)
   } else if (pattern) {
     const regex = new RegExp(pattern)
-    check = line => line.match(regex)
+    check = line => Boolean(line.match(regex))
   }
 
-  return (line, lineNo, state) => {
-    if (cmd === 'on' && (state.printOn || check(line, lineNo))) {
-      state.printOn = true
-    } else if (cmd === 'off' && check(line, lineNo)) {
-      state.printOn = false
-    }
+  return {
+    beforeEach(line, state) {
+      state.suppressedLine = null
+    },
+    line: (line, lineNo, state) => {
+      if (cmd === 'on' && state.printOn == null) {
+        state.printOn = false
+      } else if (cmd === 'toggle' && state.printOn == null) {
+        state.printOn = true
+      } else if (cmd === 'off' && state.printOn == null) {
+        state.printOn = true
+      }
 
-    if (state.printOn) {
-      return line
-    }
+      if (
+        cmd === 'on' &&
+        state.suppressedLine != null &&
+        !state.printOn &&
+        check(state.suppressedLine, lineNo)
+      ) {
+        state.printOn = true
+        line = state.suppressedLine
+      } else if (cmd === 'on' && (state.printOn || check(line, lineNo))) {
+        state.printOn = true
+      } else if (cmd === 'off' && check(line, lineNo)) {
+        state.printOn = false
+      } else if (cmd === 'toggle' && check(line, lineNo)) {
+        state.printOn = !state.printOn
+      }
 
-    if (cmd === 'after' && check(line, lineNo)) {
-      state.printOn = true
-    }
+      if (state.printOn) {
+        state.suppressedLine = null
+        return line
+      } else {
+        state.suppressedLine ??= line
+      }
+
+      if (
+        cmd === 'after' &&
+        state.suppressedLine != null &&
+        !state.printOn &&
+        check(state.suppressedLine, lineNo)
+      ) {
+        state.printOn = true
+      } else if (cmd === 'after' && check(line, lineNo)) {
+        state.printOn = true
+      }
+    },
+    after(state) {},
   }
 }
 
@@ -610,50 +500,71 @@ function groupMatchRule(index, pattern, delim) {
 }
 
 function toLineRule([cmd, pattern, replace, _, delim]) {
+  let rule
   switch (cmd) {
     case 'sub':
     case 's':
-      return substitutionRule(delim, pattern, replace)
+      rule = substitutionRule(delim, pattern, replace)
+      break
     case 'gsub':
     case 'g':
-      return globalSubstitutionRule(delim, pattern, replace)
+      rule = globalSubstitutionRule(delim, pattern, replace)
+      break
     case 'take':
     case 't':
-      return takeRule(delim, pattern)
+      rule = takeRule(delim, pattern)
+      break
     case 'rm':
     case 'r':
-      return removeRule(delim, pattern)
+      rule = removeRule(delim, pattern)
+      break
     case 'print':
     case 'p':
-      return printRule(delim, pattern)
+      rule = printRule(delim, pattern)
+      break
     case 'kill':
     case 'k':
     case '!p':
     case '!print':
-      return killRule(delim, pattern)
+      rule = killRule(delim, pattern)
+      break
     case 'uniq':
     case 'unique':
-      return uniqueRule(delim, pattern)
+      rule = uniqueRule(delim, pattern)
+      break
     case 'trim':
-      return trimRule(delim, pattern)
+      rule = trimRule(delim, pattern)
+      break
     case 'prepend':
     case 'prefix':
-      return prependRule(pattern)
+      rule = prependRule(pattern)
+      break
     case 'append':
     case 'suffix':
-      return appendRule(pattern)
+      rule = appendRule(pattern)
+      break
     case 'surround':
-      return surroundRule(pattern, replace)
+      rule = surroundRule(pattern, replace)
+      break
     case 'on':
     case 'off':
     case 'after':
-      return controlPrintingRule(cmd, delim, pattern)
+    case 'toggle':
+      rule = controlPrintingRule(cmd, delim, pattern)
+      break
     default:
       if (cmd.match(/^\d+$/)) {
         const index = parseInt(cmd)
-        return groupMatchRule(index, pattern, delim)
+        rule = groupMatchRule(index, pattern, delim)
       }
+      break
   }
+
+  if (rule instanceof Function) {
+    return {line: rule}
+  }
+
+  return rule
 }
 
 function documentSortRule(pattern) {
@@ -666,7 +577,7 @@ function documentSortRule(pattern) {
         if (aMatch && bMatch) {
           return aMatch[0].localeCompare(bMatch[0])
         } else {
-          return 0;
+          return 0
         }
       }
 
@@ -676,9 +587,7 @@ function documentSortRule(pattern) {
 }
 
 function documentReverseRule() {
-  return lines => {
-    return lines.reverse()
-  }
+  return lines => lines.toReversed()
 }
 
 function documentLineNumbersRule(pattern, replace) {
@@ -687,7 +596,58 @@ function documentLineNumbersRule(pattern, replace) {
     return lines.map(([line, lineNo]) => {
       let lineNoStr = lineNo.toString()
       let pad = ' '.repeat(max.toString().length - lineNoStr.length)
-      return [pad + lineNoStr + pattern + ':' + replace + line, lineNo]
+      return pad + lineNoStr + pattern + ':' + replace + line
+    })
+  }
+}
+
+/**
+ * Similar to the line substitution rule, but the substituted text is "spread"
+ * across all the lines that match.
+ */
+function documentSubstituteLinesRule(pattern, replace, delim) {
+  const replaceLines = replace.split('\n')
+  let index = 0
+  let test
+
+  if (delim === ':') {
+    check = toLineRangeTest(pattern)
+  } else {
+    check = (line) => line.match(regex)
+  }
+
+  return lines => {
+    const matchedLineNumbers = []
+    // find all the lines that match, put into matchedLineNumbers
+    // if (matchedLineNumbers >= replaceLines) {
+    //   remove extra matched lines
+    // } else (matchedLineNumbers < replaceLines) {
+    //   add matched lines 1:1 with replaceLines until we
+    //   get to the last matched line, then insert all
+    //   remaining lines
+    // }
+    lines.forEach(([line, lineNo]) => {
+      if (check(lineNo)) {
+        matchedLineNumbers.push(lineNo)
+      }
+    })
+
+    return lines.flatMap(([line, lineNo]) => {
+      if (matchedLineNumbers.length && matchedLineNumbers[0] === lineNo) {
+        matchedLineNumbers.shift()
+        if (matchedLineNumbers.length === 0) {
+          return replaceLines
+        } else {
+          const nextLine = replaceLines.shift()
+          if (nextLine == null) {
+            return []
+          } else {
+            return [nextLine]
+          }
+        }
+      }
+
+      return [line]
     })
   }
 }
@@ -707,62 +667,72 @@ function documentSurroundRule(prependText, appendText) {
 
   return lines => {
     return prependLines
-      .map((line, index) => [line, index + 1])
+      .map((line, index) => line)
       .concat(
         lines.map(([line, lineNo]) => {
-          return [line, prependLength + lineNo]
+          return line
         }),
       )
-      .concat(
-        appendLines.map((line, index) => [
-          line,
-          prependLength + lines.length + index + 1,
-        ]),
-      )
+      .concat(appendLines)
   }
 }
 
 function documentJoinLinesRule(joiner) {
-  return lines => {
-    return [[lines.map(([line]) => line).join(joiner || ' ')]]
-  }
+  return lines => lines.map(([line]) => line).join(joiner || ' ')
 }
 
 function documentLinesRule(lineRules) {
   return lines => {
     const state = resetState()
 
-    return lines.flatMap(([line, lineNo]) => {
+    for (const lineRule of lineRules) {
+      lineRule.before?.(state)
+    }
+
+    const retLines = lines.flatMap(([line, lineNo]) => {
       for (const lineRule of lineRules) {
-        line = lineRule(line, lineNo, state)
-        if (line == null) {
-          return []
-        }
+        line = lineRule.line(line ?? '', lineNo, state)
       }
 
-      return [[line, lineNo]]
+      if (line == null) {
+        return []
+      }
+
+      return [line]
     })
+
+    for (const lineRule of lineRules) {
+      lineRule.after?.(state)
+    }
+
+    return retLines
   }
 }
 
-function toDocumentRule([cmd, pattern, replace]) {
-  if (cmd === 'sort') {
-    return documentSortRule(pattern)
-  } else if (cmd === 'reverse') {
-    return documentReverseRule()
-  } else if (cmd === 'docprepend' || cmd === 'docprefix') {
-    return documentPrependRule(pattern)
-  } else if (cmd === 'docappend' || cmd === 'docsuffix') {
-    return documentAppendRule(pattern)
-  } else if (cmd === 'docsurround') {
-    return documentSurroundRule(pattern, replace)
-  } else if (cmd === 'line') {
-    return documentLineNumbersRule(pattern, replace)
-  } else if (cmd === 'join') {
-    return documentJoinLinesRule(pattern)
-  } else if (cmd === 'help') {
-    help()
-    process.exit(0);
+function toDocumentRule([cmd, pattern, replace, _, delim]) {
+  switch (cmd) {
+    case 'sort':
+      return documentSortRule(pattern)
+    case 'reverse':
+      return documentReverseRule()
+    case 'docprepend':
+    case 'docprefix':
+      return documentPrependRule(pattern)
+    case 'docappend':
+    case 'docsuffix':
+      return documentAppendRule(pattern)
+    case 'docsurround':
+      return documentSurroundRule(pattern, replace)
+    case 'line':
+      return documentLineNumbersRule(pattern, replace)
+    case 'join':
+      return documentJoinLinesRule(pattern)
+    case 'sl':
+    case 'sublines':
+      return documentSubstituteLinesRule(pattern, replace, delim)
+    case 'help':
+      help()
+      process.exit(0)
   }
 }
 
@@ -835,7 +805,7 @@ function lineStream(inputStream, transform = undefined) {
   })
 
   inputStream.on('end', () => {
-    if (buffer.length > 0) emit(buffer)
+    emit(buffer)
     let autoclose = true
     function keepOpen() {
       autoclose = false
@@ -964,6 +934,9 @@ function main(args) {
     print: (line, nl = true) => {
       process.stdout.write(line + (nl ? '\n' : ''))
     },
+    error: (line, nl = true) => {
+      process.stderr.write(line + (nl ? '\n' : ''))
+    },
   }
 
   let lineRules = []
@@ -1068,6 +1041,11 @@ function main(args) {
   // 2. don't store the output in lines
   // 3. output immediately
   const state = resetState()
+
+  for (const lineRule of lineRules) {
+    lineRule.before?.(state)
+  }
+
   return inputStream
     .on('line', line => {
       const original = line
@@ -1076,31 +1054,43 @@ function main(args) {
       lineNo += 1
 
       for (const lineRule of lineRules) {
-        line = lineRule(line, lineNo, state)
-        if (line == null) {
-          break
-        }
+        lineRule.beforeEach?.(line, state)
       }
 
+      for (const lineRule of lineRules) {
+        line = lineRule.line(line ?? '', lineNo, state)
+      }
 
-      if (!options.diff && documentRules.length === 0 && line != null) {
+      for (const lineRule of lineRules) {
+        lineRule.afterEach?.(line, state)
+      }
+
+      if (line == null) {
+        return
+      }
+
+      if (!options.diff && documentRules.length === 0) {
         options.print(line)
-      } else if (line != null) {
+      } else {
         lines.push([line, lineNo])
       }
     })
     .on('end', (keepOpen, close) => {
+      for (const lineRule of lineRules) {
+        lineRule.after?.(state)
+      }
+
       for (const documentRule of documentRules) {
-        lines = documentRule(lines)
+        const nextLines = documentRule(lines)
         if (!lines?.length) {
           break
         }
 
         // reset line numbers between documentRules
-        lines = lines.map(([line], index) => [line, index + 1])
+        lines = nextLines.map((line, index) => [line, index + 1])
       }
 
-      lines = lines?.map(([line]) => line) ?? []
+      const finalLines = lines?.map(([line]) => line) ?? []
 
       if (options.diff) {
         let lineRun = {
@@ -1185,7 +1175,7 @@ function main(args) {
         }
 
         originalLines.forEach((original, lineIndex) => {
-          const line = lines[lineIndex] ?? ''
+          const line = finalLines[lineIndex] ?? ''
 
           push(original, line, lineIndex)
         })
@@ -1195,7 +1185,7 @@ function main(args) {
         if (options.write && lineRun.hasDiff) {
           if (options.interactive) {
             if (!process.stdin.isTTY) {
-              options.print(
+              options.error(
                 red(
                   `Cannot run interactively – input is coming from stdin`,
                   options.color,
@@ -1217,18 +1207,18 @@ function main(args) {
             stdin.on('line', line => {
               if (line === '' || line === 'y' || line === 'yes') {
                 if (options.dryRun) {
-                  options.print(
+                  options.error(
                     yellow(`Dry Run: ${options.writeToFile}`, options.color),
                   )
                 } else {
-                  writeLinesToFile(lines, options.writeToFile)
+                  writeLinesToFile(finalLines, options.writeToFile)
                 }
               } else if (line === 'n') {
-                options.print(
+                options.error(
                   yellow(`Skipping ${options.writeToFile}`, options.color),
                 )
               } else {
-                options.print(
+                options.error(
                   red(`Unknown response '${line}'. Aborting`, options.color),
                 )
                 process.exit(1)
@@ -1238,27 +1228,175 @@ function main(args) {
             })
           } else {
             if (options.dryRun) {
-              options.print(
+              options.error(
                 yellow(`Dry Run: ${options.writeToFile}`, options.color),
               )
             } else {
-              writeLinesToFile(lines, options.writeToFile)
+              writeLinesToFile(finalLines, options.writeToFile)
             }
           }
         }
       } else {
-        for (const line of lines) {
+        for (const line of finalLines) {
           options.print(line)
         }
       }
     })
 }
 
-try {
-  // remove 'node' and 'ssed' from argv
-  main(process.argv.slice(2))
-} catch (e) {
-  process.stderr.write(`ssed: ${e.message}\n`)
+function toDelimiterRegex(delim) {
+  if (delim === '{' || delim === '}') {
+    return /[\{\}]/
+  }
+
+  if (delim === '[' || delim === ']') {
+    return /[\[\]]/
+  }
+
+  if (delim === '(' || delim === ')') {
+    return /[\(\)]/
+  }
+
+  if (delim === '<' || delim === '>') {
+    return /[<>]/
+  }
+
+  return delim
+}
+
+function unescape(str) {
+  return str.replace(/\\(.)/g, (_, char) => {
+    if (char === 'n') {
+      return '\n'
+    }
+    if (char === 't') {
+      return '\t'
+    }
+    return `\\${char}`
+  })
+}
+
+function parseRuleArgs(rule) {
+  const command = rule.match(/^(\w+\b|\d+|!p(?:rint)?)(.)/)
+  if (!command) {
+    const [simpleCommand] = rule.match(/^(\w+\b|\d+|!p(?:rint)?)$/) ?? []
+    if (!simpleCommand) {
+      throw Error(`Invalid: ${rule}`)
+    }
+    return [simpleCommand, '', '', []]
+  }
+
+  const [cmd, delim] = [command[1], command[2]]
+  const [, ...args] = rule
+    .slice(delim.length)
+    .split(toDelimiterRegex(delim))
+    .map(unescape)
+  const [pattern, replace] = args
+
+  return [cmd.toLowerCase(), pattern ?? '', replace ?? '', args, delim]
+}
+
+function help() {
+  process.stderr.write(`usage: ssed [options] [rules]
+
+Options:
+  --diff                       Only show differences
+  --no-diff                    Do not show differences
+
+  --color                      Enable ANSI colors (true if stdout is a TTY)
+  --no-color                   Disable ANSI colors
+
+  --input                      Take file names from standard input (\`ls | ssed --input\`)
+  --input=fromfile             Use 'fromfile' as input
+  --input=fromfile1,fromfile2  Run against multiple files.
+
+  --write                      Write each changed file in place.
+  --write=tofile               Provide a destination file name.
+  --write=%.backup             '\%' is replaced with the input file.
+  --no-write                   Do not write each changed file in place.
+
+  --interactive                Ask before writing the file
+  --no-interactive             Do not ask before writing the file
+
+  --dry-run (-n)               Show which files would be affected.
+  --no-dry-run                 Do not show which files would be affected.
+
+Line Rules
+----------
+Line rules operate on every line. Commands 'on', 'after' and 'off' share the on/off state.
+
+  s/search/replace (aka sub/…/…)   Replace the first instance of 'search' with 'replace'
+  g/search/replace (aka gsub/…/…)  Replace every instance of 'search' with 'replace'
+  t/pattern (aka take/…)           Only print the matching part of the line, or print the entire line if 'pattern' doesn't match
+  1/pattern                        Only print the first group of the match
+  r/pattern (aka rm/…)             Remove the matching part of the line, or print the entire line if 'pattern' doesn't match
+
+  on/pattern                       Start printing on the line where 'pattern' is matched
+  off/pattern                      Stop printing on the line where 'pattern' is matched
+  after/pattern                    Start printing on the line *after* 'pattern' is matched
+  toggle/pattern                   Turn printing off at the matching line, then off, then on...
+
+  p/pattern (aka print/…)          Only print lines that match 'pattern'
+  k/pattern (aka kill/…)           Do not print lines that match 'pattern'
+  !p/pattern (aka !print/…)        Alias for k/kill because I can't remember one (k) and always remember the other (p)
+
+  prepend/text (aka prefix/…)
+  append/text (aka suffix/…)       Adds text to the beginning (prepend) or end (append) of the line
+  surround/prefix/suffix
+
+
+  uniq (aka unique)                Only print unique lines
+  uniq/pattern                     Only print matching lines, and only unique matches (uniqueness is determined by the matching regex)
+
+Document Rules:
+  sublines/pattern/replace            For every line that matches, insert one line from replace. Remaining lines will
+       (aka sl/…)                     be inserted into the last matched line. Does not do regex replacement.
+
+  sort  sort/pattern                  Sort the lines alphabettically using localeCompare. If a pattern is provided, that part of the line will be used.
+  sortn                               Sort the lines numerically (tries to be smart about scanning number)
+  reverse                             Obvious
+  line                                Prepend each line with the line number
+
+  docprepend (docprefix)
+  docappend (docsuffix)               Prepend, append, or surround the document (add header/footer)
+  docsurround
+  join  join/separator                Join lines with a space (or optional separator)
+
+Separators:
+  s/foo/bar
+  s/foo/bar/
+  s|foo|bar
+  s{foo}bar
+
+Line Number rules
+-----------------
+Using the special delimiter ':' you can apply most rules on line numbers instead of line content.
+This bypasses any regular expression substitution (in case of 'sub' commands).
+
+For example
+  s:1:replace                      Replaces line 1 with the word "replace"
+  p:1                              Only print line 1
+
+Not all rules support this feature, but typically any rule that _could_ support it, _does_
+
+Line numbers can be expressed as a single number, a range, an open range, a modulo operation, and a comma-separated list of rules
+  p:1                              Only matches the line number (only matches line 1)
+  p:%2                             Matches lines that are modulo-N (even lines)
+  p:%2-1                           Matches lines that are modulo-N minus Y (odd lines)
+  p:1,3,5                          Matches the listed line numbers (and only these)
+  p:1-5                            Matches the range of number, inclusive (1,2,3,4,5)
+  p:9-                             Matches the line number and all subsequent lines (lines 9 and onward)
+  p:-9                             Matches lines up to and including the line number (lines 1-9)
+  p:1-5,10-15,20,30+               Ranges and single lines can be mixed and matched
+
+`)
+}
+
+function resetState() {
+  return {
+    // line-commands `on`, `after`, and `off` all share this value; toggles printing on/off
+    printOn: null,
+  }
 }
 
 function ansi(code, input) {
@@ -1294,9 +1432,13 @@ function writeLinesToFile(lines, file) {
     return
   }
 
-  if (Array.isArray(lines)) {
-    lines = lines.join('\n')
-  }
+  const output = lines.join('\n')
+  fs.writeFileSync(file, output)
+}
 
-  fs.writeFileSync(file, lines)
+try {
+  // remove 'node' and 'ssed' from argv
+  main(process.argv.slice(2))
+} catch (e) {
+  process.stderr.write(`ssed: ${e.message}\n`)
 }
