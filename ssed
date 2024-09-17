@@ -1058,7 +1058,11 @@ function main(args) {
       }
 
       for (const lineRule of lineRules) {
-        line = lineRule.line(line ?? '', lineNo, state)
+        line = lineRule.line(line, lineNo, state)
+
+        if (line == null) {
+          break
+        }
       }
 
       for (const lineRule of lineRules) {
