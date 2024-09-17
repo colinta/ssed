@@ -756,6 +756,10 @@ function toLineRangeTest(pattern) {
     }
   }
 
+  if (pattern.includes('+')) {
+    throw "Invalid line range symbol `+`"
+  }
+
   if (pattern.includes('-')) {
     const [start, stop] = pattern.split('-', 2).map((number, index) => {
       if (number === '' && index === 0) {
