@@ -569,8 +569,8 @@ function toLineRule([cmd, pattern, replace, _, delim]) {
 
 function documentSortRule(pattern) {
   const regex = pattern && new RegExp(pattern)
-  return lines => {
-    return lines.toSorted(([a], [b]) => {
+  return documentLines => {
+    return documentLines.toSorted(([a], [b]) => {
       if (regex) {
         const aMatch = a.match(regex)
         const bMatch = b.match(regex)
@@ -587,15 +587,15 @@ function documentSortRule(pattern) {
 }
 
 function documentReverseRule() {
-  return lines => lines.toReversed()
+  return documentLines => documentLines.toReversed()
 }
 
 function documentLineNumbersRule(pattern, replace) {
-  return lines => {
-    const max = lines.length
-    return lines.map(([line, lineNo]) => {
+  return documentLines => {
+    const max = documentLines.length.toString().length
+    return documentLines.map(([line, lineNo]) => {
       let lineNoStr = lineNo.toString()
-      let pad = ' '.repeat(max.toString().length - lineNoStr.length)
+      let pad = ' '.repeat(max - lineNoStr.length)
       return pad + lineNoStr + pattern + ':' + replace + line
     })
   }
@@ -613,10 +613,10 @@ function documentSubstituteLinesRule(pattern, replace, delim) {
   if (delim === ':') {
     check = toLineRangeTest(pattern)
   } else {
-    check = (line) => line.match(regex)
+    check = line => line.match(regex)
   }
 
-  return lines => {
+  return documentLines => {
     const matchedLineNumbers = []
     // find all the lines that match, put into matchedLineNumbers
     // if (matchedLineNumbers >= replaceLines) {
@@ -626,13 +626,13 @@ function documentSubstituteLinesRule(pattern, replace, delim) {
     //   get to the last matched line, then insert all
     //   remaining lines
     // }
-    lines.forEach(([line, lineNo]) => {
+    documentLines.forEach(([line, lineNo]) => {
       if (check(lineNo)) {
         matchedLineNumbers.push(lineNo)
       }
     })
 
-    return lines.flatMap(([line, lineNo]) => {
+    return documentLines.flatMap(([line, lineNo]) => {
       if (matchedLineNumbers.length && matchedLineNumbers[0] === lineNo) {
         matchedLineNumbers.shift()
         if (matchedLineNumbers.length === 0) {
@@ -665,11 +665,11 @@ function documentSurroundRule(prependText, appendText) {
   const appendLines = appendText == '' ? [] : appendText.split('\n')
   const prependLength = prependLines.length
 
-  return lines => {
+  return documentLines => {
     return prependLines
       .map((line, index) => line)
       .concat(
-        lines.map(([line, lineNo]) => {
+        documentLines.map(([line, lineNo]) => {
           return line
         }),
       )
@@ -678,31 +678,39 @@ function documentSurroundRule(prependText, appendText) {
 }
 
 function documentJoinLinesRule(joiner) {
-  return lines => lines.map(([line]) => line).join(joiner || ' ')
+  return documentLines => documentLines.map(([line]) => line).join(joiner || ' ')
 }
 
 function documentLinesRule(lineRules) {
-  return lines => {
+  return (documentLines, _, options) => {
     const state = resetState()
 
     for (const lineRule of lineRules) {
       lineRule.before?.(state)
     }
 
-    const retLines = lines.flatMap(([line, lineNo]) => {
-      for (const lineRule of lineRules) {
-        line = lineRule.line(line ?? '', lineNo, state)
-      }
+    const inputLines = [...documentLines].map(([line]) => line)
+    const isLastLineBlank = inputLines.at(-1) === ''
+    if (isLastLineBlank) {
+      inputLines.pop()
+    }
 
-      if (line == null) {
-        return []
-      }
-
-      return [line]
-    })
+    const retLines = []
+    processLines(
+      state,
+      true,
+      lineRules,
+      options,
+      retLines,
+      inputLines,
+    )
 
     for (const lineRule of lineRules) {
       lineRule.after?.(state)
+    }
+
+    if (isLastLineBlank) {
+      retLines.push('')
     }
 
     return retLines
@@ -757,7 +765,7 @@ function toLineRangeTest(pattern) {
   }
 
   if (pattern.includes('+')) {
-    throw "Invalid line range symbol `+`"
+    throw 'Invalid line range symbol `+`'
   }
 
   if (pattern.includes('-')) {
@@ -924,6 +932,43 @@ function parseOption(arg) {
   }
 }
 
+function processLines(
+  state,
+  hasDocumentRules,
+  lineRules,
+  options,
+  lines,
+  linesBuffer,
+) {
+  for (let line of linesBuffer) {
+    state.lineNumber += 1
+
+    for (const lineRule of lineRules) {
+      lineRule.beforeEach?.(line, state)
+    }
+
+    for (const lineRule of lineRules) {
+      line = lineRule.line(line, state.lineNumber, state)
+
+      if (line == null) {
+        break
+      }
+    }
+
+    for (const lineRule of lineRules) {
+      lineRule.afterEach?.(line, state)
+    }
+
+    if (line != null) {
+      if (!options.diff && !hasDocumentRules) {
+        options.print(line)
+      } else {
+        lines.push(line)
+      }
+    }
+  }
+}
+
 function main(args) {
   let options = {
     input: process.stdin,
@@ -1033,7 +1078,6 @@ function main(args) {
   const inputStream = lineStream(options.input)
   const originalLines = []
   let lines = []
-  let lineNo = 0
 
   // if (
   //   we only have line rules,
@@ -1050,55 +1094,61 @@ function main(args) {
     lineRule.before?.(state)
   }
 
+  let linesBuffer = []
   return inputStream
     .on('line', line => {
       const original = line
       originalLines.push(original)
 
-      lineNo += 1
-
-      for (const lineRule of lineRules) {
-        lineRule.beforeEach?.(line, state)
-      }
-
-      for (const lineRule of lineRules) {
-        line = lineRule.line(line, lineNo, state)
-
-        if (line == null) {
-          break
-        }
-      }
-
-      for (const lineRule of lineRules) {
-        lineRule.afterEach?.(line, state)
-      }
-
-      if (line == null) {
+      linesBuffer.push(line)
+      // special handling for blank lines – if the last line is blank we skip it
+      if (line === '') {
         return
       }
 
-      if (!options.diff && documentRules.length === 0) {
-        options.print(line)
-      } else {
-        lines.push([line, lineNo])
-      }
+      processLines(
+        state,
+        documentRules.length > 0,
+        lineRules,
+        options,
+        lines,
+        linesBuffer,
+      )
+
+      linesBuffer = []
     })
     .on('end', (keepOpen, close) => {
+      if (linesBuffer.length === 1) {
+        if (!options.diff && documentRules.length === 0) {
+          options.print('')
+        } else {
+          state.lineNumber += 1
+          lines.push('')
+        }
+      } else if (linesBuffer.length) {
+        processLines(
+          state,
+          documentRules.length > 0,
+          lineRules,
+          options,
+          lines,
+          linesBuffer,
+        )
+      }
+
       for (const lineRule of lineRules) {
         lineRule.after?.(state)
       }
 
       for (const documentRule of documentRules) {
-        const nextLines = documentRule(lines)
+        const linesWithNumbers = lines.map((line, index) => [line, index + 1])
+        lines = documentRule(linesWithNumbers, state, options)
         if (!lines?.length) {
           break
         }
-
-        // reset line numbers between documentRules
-        lines = nextLines.map((line, index) => [line, index + 1])
       }
 
-      const finalLines = lines?.map(([line]) => line) ?? []
+      const finalLines = lines ?? []
 
       if (options.diff) {
         let lineRun = {
@@ -1307,6 +1357,16 @@ function parseRuleArgs(rule) {
 function help() {
   process.stderr.write(`usage: ssed [options] [rules]
 
+    ssed is an alternative to 'sed', with some similar commands, but
+    not a drop-in replacement.
+
+    Line rules transform on a line-by-line basis and support STDIN streaming.
+
+    Document rules transform on the entire document. STDIN is read to completion
+    before commands are executed.
+
+    If the last line is blank, it is ignored.
+
 Options:
   --diff                       Only show differences
   --no-diff                    Do not show differences
@@ -1404,6 +1464,7 @@ function resetState() {
   return {
     // line-commands `on`, `after`, and `off` all share this value; toggles printing on/off
     printOn: null,
+    lineNumber: 0,
   }
 }
 
