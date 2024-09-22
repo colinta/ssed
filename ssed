@@ -1355,19 +1355,26 @@ function parseRuleArgs(rule) {
 }
 
 function help() {
-  process.stderr.write(`usage: ssed [options] [rules]
+  process.stderr.write(`Usage:
+  ssed [options] [rules]
 
-    ssed is an alternative to 'sed', with some similar commands, but
-    not a drop-in replacement.
+About
+-----
+    ssed is an alternative to 'sed'. Not a drop-in replacement, but used for
+    similar tasks. I wanted more familiar and modern Regex support, and have
+    kept adding more functions as ssed became more and more my go-to text
+    manipulation tool.
 
-    Line rules transform on a line-by-line basis and support STDIN streaming.
+    Line rules transform on a line-by-line basis and, if only line rules are
+    employed, support STDIN streaming.
 
-    Document rules transform on the entire document. STDIN is read to completion
-    before commands are executed.
+    Document rules transform the entire document. STDIN is read to completion
+    before document rules are executed.
 
     If the last line is blank, it is ignored.
 
-Options:
+Options
+-------
   --diff                       Only show differences
   --no-diff                    Do not show differences
 
@@ -1412,11 +1419,11 @@ Line rules operate on every line. Commands 'on', 'after' and 'off' share the on/
   append/text (aka suffix/…)       Adds text to the beginning (prepend) or end (append) of the line
   surround/prefix/suffix
 
-
   uniq (aka unique)                Only print unique lines
   uniq/pattern                     Only print matching lines, and only unique matches (uniqueness is determined by the matching regex)
 
-Document Rules:
+Document Rules
+--------------
   sublines/pattern/replace            For every line that matches, insert one line from replace. Remaining lines will
        (aka sl/…)                     be inserted into the last matched line. Does not do regex replacement.
 
@@ -1430,7 +1437,8 @@ Document Rules:
   docsurround
   join  join/separator                Join lines with a space (or optional separator)
 
-Separators:
+Example separators
+------------------
   s/foo/bar
   s/foo/bar/
   s|foo|bar
