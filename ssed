@@ -11,6 +11,12 @@ process.stdout.on('error', function(err) {
   }
 });
 
+function requireArg(name, value) {
+  if (value == null) {
+    throw Error(`Missing argument: ${name}`)
+  }
+}
+
 /**
  * Performs a single substitution on every line that matches. Use gsub to replace
  * multiple substitutions perline.
@@ -35,6 +41,9 @@ process.stdout.on('error', function(err) {
  *                          text
  */
 function substitutionRule(delim, pattern, replace) {
+  requireArg('pattern', pattern)
+  requireArg('replace', replace)
+
   if (delim === ':') {
     const lineRangeTest = toLineRangeTest(pattern)
 
@@ -67,6 +76,9 @@ function substitutionRule(delim, pattern, replace) {
  *     this is text | s|t|T => This is Text
  */
 function globalSubstitutionRule(delim, pattern, replace) {
+  requireArg('pattern', pattern)
+  requireArg('replace', replace)
+
   if (delim === ':') {
     throw Error(`'gsub' does not support '${delim}' delimiter`)
   }
@@ -100,6 +112,8 @@ function globalSubstitutionRule(delim, pattern, replace) {
  *     text | take:1 => this
  */
 function takeRule(delim, pattern) {
+  requireArg('pattern', pattern)
+
   if (delim === ':') {
     const lineRangeTest = toLineRangeTest(pattern)
 
@@ -141,6 +155,8 @@ function takeRule(delim, pattern) {
  *                    text
  */
 function removeRule(delim, pattern) {
+  requireArg('pattern', pattern)
+
   if (delim === ':') {
     const lineRangeTest = toLineRangeTest(pattern)
 
@@ -183,6 +199,8 @@ function removeRule(delim, pattern) {
  *                         text
  */
 function printRule(delim, pattern) {
+  requireArg('pattern', pattern)
+
   if (delim === ':') {
     const lineRangeTest = toLineRangeTest(pattern)
 
@@ -225,6 +243,8 @@ function printRule(delim, pattern) {
  *                      text
  */
 function killRule(delim, pattern) {
+  requireArg('pattern', pattern)
+
   if (delim === ':') {
     const lineRangeTest = toLineRangeTest(pattern)
 
@@ -271,6 +291,8 @@ function killRule(delim, pattern) {
  *                                           do you know bob?
  */
 function uniqueRule(delim, pattern) {
+  requireArg('pattern', pattern)
+
   if (delim === ':') {
     throw Error(`'uniq' does not support '${delim}' delimiter`)
   }
@@ -319,12 +341,14 @@ function uniqueRule(delim, pattern) {
  *                                      |   line 3|
  */
 function trimRule(delim, pattern) {
+  requireArg('pattern', pattern)
+
   let trim = line => line.trim()
-  if (pattern == 'left') {
+  if (pattern === 'left') {
     trim = line => line.replace(/^\s+/, '')
-  } else if (pattern == 'right') {
+  } else if (pattern === 'right') {
     trim = line => line.replace(/\s+$/, '')
-  } else if (pattern) {
+  } else if (pattern && pattern !== 'both') {
     // error
     throw Error(`Invalid: trim${delim}${pattern}`)
   }
@@ -422,11 +446,13 @@ function surroundRule(prepend, append) {
  *                               g   # off until 'f', then turned on starting at next line
  */
 function controlPrintingRule(cmd, delim, pattern) {
+  requireArg('pattern', pattern)
+
   let check = (_line, _lineNo) => true
   if (delim === ':') {
     const lineRangeTest = toLineRangeTest(pattern)
     check = (_, lineNo) => lineRangeTest(lineNo)
-  } else if (pattern) {
+  } else {
     const regex = new RegExp(pattern)
     check = line => Boolean(line.match(regex))
   }
@@ -628,6 +654,8 @@ function documentLineNumbersRule(pattern, replace) {
  * across all the lines that match.
  */
 function documentSubstituteLinesRule(pattern, replace, delim) {
+  requireArg('pattern', pattern)
+
   const replaceLines = replace.split('\n')
   let index = 0
   let test
@@ -635,6 +663,7 @@ function documentSubstituteLinesRule(pattern, replace, delim) {
   if (delim === ':') {
     check = toLineRangeTest(pattern)
   } else {
+    const regex = new RegExp(pattern)
     check = line => line.match(regex)
   }
 
@@ -767,6 +796,8 @@ function toDocumentRule([cmd, pattern, replace, _, delim]) {
 }
 
 function toLineRangeTest(pattern) {
+  requireArg('pattern', pattern)
+
   if (pattern === '*') {
     return () => true
   }
@@ -1364,7 +1395,7 @@ function parseRuleArgs(rule) {
     if (!simpleCommand) {
       throw Error(`Invalid: ${rule}`)
     }
-    return [simpleCommand, '', '', []]
+    return [simpleCommand, null, null, []]
   }
 
   const [cmd, delim] = [command[1], command[2]]
@@ -1374,7 +1405,7 @@ function parseRuleArgs(rule) {
     .map(unescape)
   const [pattern, replace] = args
 
-  return [cmd.toLowerCase(), pattern ?? '', replace ?? '', args, delim]
+  return [cmd.toLowerCase(), pattern, replace, args, delim]
 }
 
 function help() {
