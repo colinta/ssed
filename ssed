@@ -1,6 +1,15 @@
 #!/usr/bin/env node
 const fs = require('fs')
 const EventEmitter = require('events')
+const exec = require('child_process').exec;
+
+process.stdout.on('error', function(err) {
+  if (err.code === 'EPIPE') {
+    exec('stty echo', () => {
+      process.exit(0);
+    })
+  }
+});
 
 /**
  * Performs a single substitution on every line that matches. Use gsub to replace
@@ -804,8 +813,6 @@ function lineStream(inputStream, transform = undefined) {
     }
   }
 
-  inputStream.resume()
-  inputStream.setEncoding('utf-8')
   inputStream.on('open', function () {
     stdin.emit('open')
   })
@@ -830,6 +837,9 @@ function lineStream(inputStream, transform = undefined) {
       close()
     }
   })
+
+  inputStream.resume()
+  inputStream.setEncoding('utf-8')
 
   stdin.pause = inputStream.pause.bind(inputStream)
   stdin.close = () => {
