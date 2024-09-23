@@ -1276,146 +1276,136 @@ function main(args, options = {}) {
       }
 
       if (options.diff) {
-        let lineRun = {
-          hasDiff: false,
-          lineNumber: 0,
-          before: [],
-          prev: [],
-          next: [],
-          after: [],
-        }
+        const linesDiff = diff(originalLines, finalLines)
+        const hasDiff = !(linesDiff.length === 1 && linesDiff[0].type === 'same')
+        if (hasDiff) {
+          options.print(yellow(options.diffHeader, options.color))
 
-        function flush(EOF = false) {
-          const {before, prev, next, after, lineNumber} = lineRun
-
-          if (!EOF && lineNumber === -1) {
-            return
-          }
-
-          if (!EOF && after.length < options.diffContext) {
-            return
-          }
-
-          if (EOF && prev.length === 0 && next.length === 0) {
-            return
-          }
-
-          if (!lineRun.hasDiff) {
-            options.print(yellow(options.diffHeader, options.color))
-          }
-
-          const firstIndex = Math.max(before.length - options.diffContext, 0)
-          options.print(
-            magenta(
-              `@@ -${lineNumber + firstIndex},0 +${
-                lineNumber + firstIndex
-              },0 @@`,
-              options.color,
-            ),
-          )
-          for (const line of before.slice(firstIndex)) {
-            options.print(` ${line}`)
-          }
-
-          for (const line of prev) {
-            options.print(red(`-${line}`, options.color))
-          }
-          for (const line of next) {
-            options.print(green(`+${line}`, options.color))
-          }
-
-          for (const line of after) {
-            options.print(` ${line}`)
-          }
-
-          lineRun = {
-            before: [],
-            prev: [],
-            next: [],
-            after: [],
-            hasDiff: true,
-            lineNumber: -1,
-          }
-        }
-
-        function push(prev, next, lineNumber) {
-          if (lineRun.lineNumber === -1) {
-            lineRun.lineNumber = lineNumber
-          }
-
-          if (prev === next) {
-            if (lineRun.prev.length) {
-              lineRun.after.push(next)
-            } else {
-              lineRun.before.push(next)
-            }
-
-            flush(false)
-          } else {
-            lineRun.prev.push(prev)
-            lineRun.next.push(next)
-          }
-        }
-
-        originalLines.forEach((original, lineIndex) => {
-          const line = finalLines[lineIndex] ?? ''
-
-          push(original, line, lineIndex)
-        })
-
-        flush(true)
-
-        if (options.write && lineRun.hasDiff) {
-          if (options.interactive) {
-            if (!process.stdin.isTTY) {
-              options.error(
-                red(
-                  `Cannot run interactively – input is coming from stdin`,
+          let inputLineNumber = 1
+          let outputLineNumber = 1
+          let didPrintNumbers = false
+          function printLineNumbers(inputLineNumber, outputLineNumber) {
+            if (!didPrintNumbers) {
+              options.print(
+                magenta(
+                  `@@ -${inputLineNumber} +${outputLineNumber} @@`,
                   options.color,
                 ),
               )
-              process.exit(1)
+
+              didPrintNumbers = true
+            }
+          }
+
+          linesDiff.forEach((entry, index) => {
+            if (!entry.lines.length) {
+              return
             }
 
-            options.print(
-              yellow(
-                `Write changes to ${options.writeToFile}? [Yn] `,
-                options.color,
-              ),
-              false,
-            )
-            keepOpen()
+            if (entry.type === 'same') {
+              if (index === 0) {
+                didPrintNumbers = false
 
-            const stdin = lineStream(process.stdin)
-            stdin.on('line', line => {
-              if (line === '' || line === 'y' || line === 'yes') {
-                if (options.dryRun) {
-                  options.error(
-                    yellow(`Dry Run: ${options.writeToFile}`, options.color),
-                  )
-                } else {
-                  writeLinesToFile(finalLines, options.writeToFile)
-                }
-              } else if (line === 'n') {
-                options.error(
-                  yellow(`Skipping ${options.writeToFile}`, options.color),
-                )
+                const printLines = entry.lines.slice(Math.max(entry.lines.length - 3, 0))
+                inputLineNumber += entry.lines.length - printLines.length
+                outputLineNumber += entry.lines.length - printLines.length
+                printLineNumbers(inputLineNumber, outputLineNumber)
+                printLines.forEach((line) => options.print(line))
+                inputLineNumber += printLines.length
+                outputLineNumber += printLines.length
+              }
+              else if (index === linesDiff.length - 1) {
+                const printLines = entry.lines.slice(0, 4)
+                printLineNumbers(inputLineNumber, outputLineNumber)
+                inputLineNumber += entry.lines.length - printLines.length
+                outputLineNumber += entry.lines.length - printLines.length
+                printLines.forEach((line) => options.print(line))
+                inputLineNumber += printLines.length
+                outputLineNumber += printLines.length
+              } else if (entry.lines.length <= 5){
+                entry.lines.forEach((line) => options.print(line))
+                inputLineNumber += entry.lines.length
+                outputLineNumber += entry.lines.length
               } else {
+                didPrintNumbers = false
+
+                const beforeLines = entry.lines.slice(0, 3)
+                const afterLines = entry.lines.slice(Math.max(entry.lines.length - 3, 0))
+                beforeLines.forEach((line) => options.print(line))
+                inputLineNumber += entry.lines.length - afterLines.length
+                outputLineNumber += entry.lines.length - afterLines.length
+                printLineNumbers(inputLineNumber, outputLineNumber)
+                afterLines.forEach((line) => options.print(line))
+              }
+
+              return
+            }
+
+            entry.lines.forEach(line => {
+              printLineNumbers(inputLineNumber, outputLineNumber)
+
+              if (entry.type === 'added') {
+                outputLineNumber += 1
+                options.print(green(`+${line}`, options.color))
+              } else if (entry.type === 'removed') {
+                inputLineNumber += 1
+                options.print(red(`-${line}`, options.color))
+              }
+            })
+          })
+
+          if (options.write) {
+            if (options.interactive) {
+              if (!process.stdin.isTTY) {
                 options.error(
-                  red(`Unknown response '${line}'. Aborting`, options.color),
+                  red(
+                    `Cannot run interactively – input is coming from stdin`,
+                    options.color,
+                  ),
                 )
                 process.exit(1)
               }
-              stdin.close()
-              close()
-            })
-          } else {
-            if (options.dryRun) {
-              options.error(
-                yellow(`Dry Run: ${options.writeToFile}`, options.color),
+
+              options.print(
+                yellow(
+                  `Write changes to ${options.writeToFile}? [Yn] `,
+                  options.color,
+                ),
+                false,
               )
+              keepOpen()
+
+              const stdin = lineStream(process.stdin)
+              stdin.on('line', line => {
+                if (line === '' || line === 'y' || line === 'yes') {
+                  if (options.dryRun) {
+                    options.error(
+                      yellow(`Dry Run: ${options.writeToFile}`, options.color),
+                    )
+                  } else {
+                    writeLinesToFile(finalLines, options.writeToFile)
+                  }
+                } else if (line === 'n') {
+                  options.error(
+                    yellow(`Skipping ${options.writeToFile}`, options.color),
+                  )
+                } else {
+                  options.error(
+                    red(`Unknown response '${line}'. Aborting`, options.color),
+                  )
+                  process.exit(1)
+                }
+                stdin.close()
+                close()
+              })
             } else {
-              writeLinesToFile(finalLines, options.writeToFile)
+              if (options.dryRun) {
+                options.error(
+                  yellow(`Dry Run: ${options.writeToFile}`, options.color),
+                )
+              } else {
+                writeLinesToFile(finalLines, options.writeToFile)
+              }
             }
           }
         }
@@ -1644,6 +1634,60 @@ function writeLinesToFile(lines, file) {
   fs.writeFileSync(file, output)
 }
 
+function diff(oldLines, newLines) {
+  const result = [];
+  let oldIndex = 0;
+  let newIndex = 0;
+
+  while (oldIndex < oldLines.length || newIndex < newLines.length) {
+    if (oldIndex >= oldLines.length) {
+      // All remaining lines in newLines are additions
+      result.push({ type: 'added', lines: newLines.slice(newIndex) });
+      break;
+    }
+
+    if (newIndex >= newLines.length) {
+      // All remaining lines in oldLines are removals
+      result.push({ type: 'removed', lines: oldLines.slice(oldIndex) });
+      break;
+    }
+
+    if (oldLines[oldIndex] === newLines[newIndex]) {
+      // Lines are the same
+      let sameCount = 0;
+      while (oldIndex + sameCount < oldLines.length &&
+             newIndex + sameCount < newLines.length &&
+             oldLines[oldIndex + sameCount] === newLines[newIndex + sameCount]) {
+        sameCount++;
+      }
+      result.push({ type: 'same', lines: oldLines.slice(oldIndex, oldIndex + sameCount) });
+      oldIndex += sameCount;
+      newIndex += sameCount;
+    } else {
+      // Lines are different
+      let oldDiffStart = oldIndex;
+      let newDiffStart = newIndex;
+
+      while (oldIndex < oldLines.length && newLines.indexOf(oldLines[oldIndex], newDiffStart) === -1) {
+        oldIndex++;
+      }
+
+      while (newIndex < newLines.length && oldLines.indexOf(newLines[newIndex], oldDiffStart) === -1) {
+        newIndex++;
+      }
+
+      if (oldIndex > oldDiffStart) {
+        result.push({ type: 'removed', lines: oldLines.slice(oldDiffStart, oldIndex) });
+      }
+
+      if (newIndex > newDiffStart) {
+        result.push({ type: 'added', lines: newLines.slice(newDiffStart, newIndex) });
+      }
+    }
+  }
+
+  return result;
+}
 try {
   // remove 'node' and 'ssed' from argv
   main(process.argv.slice(2))
