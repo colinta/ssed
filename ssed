@@ -483,22 +483,35 @@ function controlPrintingRule(cmd, delim, pattern) {
 }
 
 /**
- * Replaces the line with the nth group of the match.
+ * Replaces the pattern with the nth group of the match. If no pattern is given,
+ * this command works like `awk {print $N}`
  *
  * Does not support line-numbers.
  *
  * Usage:
- *    ssed 1/{pattern(group)}
+ *    # for every line that matches pattern, replace the Nth regex group
+ *    ssed 1/{pattern(group1)}
  *    ssed 2/{pattern(group1)(group2)}
  *    ssed …/{pattern(…)}
+ *
+ *    # print the first "column" (columns are separated by whitespace, quotes are
+ *    # ignored)
+ *    ssed 1
  *
  * @example
  *     text | 1/\w(\w+)$ => ext
  *     this is text | 2/(\w+) (\w+) (\w+) => is
  */
-function groupMatchRule(index, pattern, delim) {
+function groupMatchRule(index, delim, pattern) {
   if (delim === ':') {
     throw Error(`'${index}' does not support '${delim}' delimiter`)
+  }
+
+  if (!pattern) {
+    return line => {
+      const match = line.split(/\s+/, index)
+      return match.length >= index - 1 ? match[index - 1] : line
+    }
   }
 
   const regex = new RegExp(pattern)
@@ -564,7 +577,7 @@ function toLineRule([cmd, pattern, replace, _, delim]) {
     default:
       if (cmd.match(/^\d+$/)) {
         const index = parseInt(cmd)
-        rule = groupMatchRule(index, pattern, delim)
+        rule = groupMatchRule(index, delim, pattern)
       }
       break
   }
