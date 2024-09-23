@@ -643,8 +643,14 @@ function documentLineNumbersRule(pattern, replace) {
     const max = documentLines.length.toString().length
     return documentLines.map(([line, lineNo]) => {
       let lineNoStr = lineNo.toString()
-      let pad = ' '.repeat(max - lineNoStr.length)
-      return pad + lineNoStr + pattern + ':' + replace + line
+      let pad
+      if (replace) {
+        pad = '0'.repeat(Math.max(Number(replace), max) - lineNoStr.length)
+      } else {
+        pad = ' '.repeat(max - lineNoStr.length)
+      }
+      const joiner = pattern ?? ':'
+      return pad + lineNoStr + joiner + line
     })
   }
 }
