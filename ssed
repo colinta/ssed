@@ -1200,6 +1200,11 @@ function main(args) {
         lineRule.after?.(state)
       }
 
+      const isLastLineBlank = lines.at(-1) === ''
+      if (isLastLineBlank) {
+        lines.pop()
+      }
+
       for (const documentRule of documentRules) {
         const linesWithNumbers = lines.map((line, index) => [line, index + 1])
         lines = documentRule(linesWithNumbers, state, options)
@@ -1209,6 +1214,9 @@ function main(args) {
       }
 
       const finalLines = lines ?? []
+      if (isLastLineBlank) {
+        finalLines.push('')
+      }
 
       if (options.diff) {
         let lineRun = {
