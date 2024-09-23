@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const fs = require('fs')
 const EventEmitter = require('events')
-const exec = require('child_process').exec;
+const {exec, execSync} = require('child_process');
 
 process.stdout.on('error', function(err) {
   if (err.code === 'EPIPE') {
@@ -709,6 +709,23 @@ function documentSubstituteLinesRule(pattern, replace, delim) {
   }
 }
 
+
+/**
+ * Similar to the line substitution rule, but the substituted text is "spread"
+ * across all the lines that match.
+ */
+function documentExecRule() {
+  return (lines, _, options) => {
+    const input = lines.map(([line]) => line).join('\n')
+
+    if (options.dryRun) {
+      return input.split('\n')
+    }
+
+    return execSync(input).toString('utf-8').split('\n')
+  }
+}
+
 function documentPrependRule(prependText) {
   return documentSurroundRule(prependText, '')
 }
@@ -795,6 +812,8 @@ function toDocumentRule([cmd, pattern, replace, _, delim]) {
     case 'sl':
     case 'sublines':
       return documentSubstituteLinesRule(pattern, replace, delim)
+    case 'exec':
+      return documentExecRule()
     case 'help':
       help()
       process.exit(0)
