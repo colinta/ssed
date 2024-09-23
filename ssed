@@ -957,13 +957,13 @@ function lineStream(inputStream, transform = undefined) {
   return stdin
 }
 
-function parseOption(arg) {
+function parseOption(options, arg, args) {
   let option
   if (arg.startsWith('--')) {
     ;[option] = arg.slice(2).match(/^([\w-]+)/) ?? [option]
   } else if (arg.startsWith('-')) {
     ;[option] = arg.slice(1).match(/^(\w+)/) ?? [option]
-    return option.split('').map(opt => parseOption(`--${opt}`))
+    return option.split('').map(opt => parseOption(options, `--${opt}`, args))
   } else {
     return
   }
@@ -1009,34 +1009,39 @@ function parseOption(arg) {
         writeToFile,
       }
     }
+    case 'no-input':
+      return {inputFromFile: false, input: process.stdin}
+    case 'ls':
+      return {inputFromFile: true, input: null}
     case 'input': {
-      const [, file] = arg.split('=', 2)
-      if (file === undefined) {
-        return {inputFromFile: true, input: null}
+      let file
+      if (arg.match(/^--input=/)) {
+        [, file] = arg.split('=', 2)
       } else {
-        switch (file) {
-          case 'stdin':
-            return {input: process.stdin}
-          default:
-            const files = file.split(',')
-            if (files.length > 1) {
-              return {
-                inputFromFile: true,
-                input: files.map(file => {
-                  if (fs.existsSync(file)) {
-                    return file
-                  } else {
-                    throw Error(`File does not exist: ${file}`)
-                  }
-                }),
-              }
-            } else {
+        file = args.shift()
+      }
+
+      const files = file.split(',')
+      const prevFiles = Array.isArray(options.input) ? options.input : []
+      if (files.length > 1) {
+        return {
+          inputFromFile: true,
+          input: [
+            ...prevFiles,
+            files.map(file => {
               if (fs.existsSync(file)) {
-                return {input: file, inputFromFile: true}
+                return file
               } else {
                 throw Error(`File does not exist: ${file}`)
               }
-            }
+            }),
+          ],
+        }
+      } else {
+        if (fs.existsSync(file)) {
+          return {inputFromFile: true, input: prevFiles.length ? [...prevFiles, file] : file}
+        } else {
+          throw Error(`File does not exist: ${file}`)
         }
       }
       break
@@ -1083,8 +1088,8 @@ function processLines(
   }
 }
 
-function main(args) {
-  let options = {
+function main(args, options = {}) {
+  options = {...options,
     input: process.stdin,
     inputFromFile: false,
     interactive: false,
@@ -1105,9 +1110,11 @@ function main(args) {
   let lineRules = []
   const documentRules = []
 
+  const argsCopy = [...args]
   const rules = []
-  for (const arg of args) {
-    const option = parseOption(arg)
+  let arg
+  while ((arg = argsCopy.shift()) != null) {
+    const option = parseOption(options, arg, argsCopy)
     if (option !== undefined) {
       options = {...options, ...option}
     } else {
@@ -1115,17 +1122,15 @@ function main(args) {
     }
   }
 
+  // array / null input
+  // array => list of files (ssed --input=file1,file2)
+  // null => read files from stdin (ssed --input - )
   if (options.inputFromFile && typeof options.input !== 'string') {
-    args = args.filter(arg => !arg.startsWith('--input'))
-
-    const files = []
-    function next() {
-      const file = files.pop()
-      if (!file) {
-        return
-      }
-
-      main([`--input=${file}`, ...args])
+    function next(file) {
+      main([], {
+        ...options,
+        input: file,
+      })
         .on('open', () => {
           if (!options.diff) {
             options.print(yellow(`ssed: ${file}`))
@@ -1140,18 +1145,16 @@ function main(args) {
 
       stdin
         .on('line', file => {
-          files.push(file)
-        })
-        .on('close', () => {
-          next()
+          next(file)
         })
     } else if (Array.isArray(options.input)) {
-      files.push(...options.input)
-      next()
+      options.input.forEach(next)
     }
 
     return
-  } else if (options.inputFromFile) {
+  }
+
+  if (options.inputFromFile) {
     options.diffHeader = `diff ${options.input}
 --- ${options.input}
 +++ ssed ${args.map(escapeShell).join(' ')}`
@@ -1503,9 +1506,13 @@ Options
   --color                      Enable ANSI colors (true if stdout is a TTY)
   --no-color                   Disable ANSI colors
 
-  --input                      Take file names from standard input (\`ls | ssed --input\`)
+  --ls                         Read file names from standard input (\`ls | ssed --ls\`)
+
   --input=fromfile             Use 'fromfile' as input
+  aka --input fromfile
+
   --input=fromfile1,fromfile2  Run against multiple files.
+  aka --input fromfile1 --input fromfile2
 
   --write                      Write each changed file in place.
   --write=tofile               Provide a destination file name.
@@ -1526,7 +1533,9 @@ Line rules operate on every line. Commands 'on', 'after' and 'off' share the on/
   g/search/replace (aka gsub/…/…)  Replace every instance of 'search' with 'replace'
   t/pattern (aka take/…)           Only print the matching part of the line, or print the entire line if 'pattern' doesn't match
   1/pattern                        Only print the first group of the match
+  1                                Only print the first "column" (columns are separated by whitespace)
   r/pattern (aka rm/…)             Remove the matching part of the line, or print the entire line if 'pattern' doesn't match
+  cols/pattern/columns             Split the line by 'pattern' (default is /\\s+/) and print columns (comma separated numbers)
 
   on/pattern                       Start printing on the line where 'pattern' is matched
   off/pattern                      Stop printing on the line where 'pattern' is matched
