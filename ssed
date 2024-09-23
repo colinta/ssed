@@ -547,7 +547,39 @@ function groupMatchRule(index, delim, pattern) {
   }
 }
 
-function toLineRule([cmd, pattern, replace, _, delim]) {
+/**
+ * A straightforward 'awk' feature: separate line on whitespace and print certain columns.
+ *
+ * Usage:
+ *    # Use default separator (\s+) and print columns 1,3,2
+ *    ssed cols//1,3,2
+ *
+ *    # Split lines by ':' and print columns 1 and 5
+ *    ssed cols/:/1,5
+ *
+ * @example
+ *     this    is    text | cols//2,1,3 => is this text
+ *     1:bb:3:4:Z | cols/:/1,3,2 => 1 3 bb
+ */
+function columnsRule(delim, pattern, replace) {
+  requireArg('pattern', pattern)
+  requireArg('replace', replace)
+
+  if (delim === ':') {
+    throw Error(`'cols' does not support '${delim}' delimiter`)
+  }
+
+  const columns = replace.split(',').map(Number)
+  const regex = pattern === '' ? /\s+/ : new RegExp(pattern)
+  return line => {
+    const match = line.match(regex)
+    if (match) {
+      return columns.map(index => match[index - 1] ?? '').join(' ')
+    }
+  }
+}
+
+function toLineRule([cmd, pattern, replace, _rest, delim]) {
   let rule
   switch (cmd) {
     case 'sub':
@@ -599,6 +631,9 @@ function toLineRule([cmd, pattern, replace, _, delim]) {
     case 'after':
     case 'toggle':
       rule = controlPrintingRule(cmd, delim, pattern)
+      break
+    case 'cols':
+      rule = columnsRule(delim, pattern, replace)
       break
     default:
       if (cmd.match(/^\d+$/)) {
@@ -791,7 +826,7 @@ function documentLinesRule(lineRules) {
   }
 }
 
-function toDocumentRule([cmd, pattern, replace, _, delim]) {
+function toDocumentRule([cmd, pattern, replace, _rest, delim]) {
   switch (cmd) {
     case 'sort':
       return documentSortRule(pattern)
@@ -1436,9 +1471,9 @@ function parseRuleArgs(rule) {
     .slice(delim.length)
     .split(toDelimiterRegex(delim))
     .map(unescape)
-  const [pattern, replace] = args
+  const [pattern, replace, ...rest] = args
 
-  return [cmd.toLowerCase(), pattern, replace, args, delim]
+  return [cmd.toLowerCase(), pattern, replace, rest, delim]
 }
 
 function help() {
