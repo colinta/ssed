@@ -1417,24 +1417,56 @@ function main(args, options = {}) {
     })
 }
 
-function toDelimiterRegex(delim) {
+function delimiterTestFn(delim) {
   if (delim === '{' || delim === '}') {
-    return /[\{\}]/
+    return char => /[\{\}]/.test(char)
   }
 
   if (delim === '[' || delim === ']') {
-    return /[\[\]]/
+    return char => /[\[\]]/.test(char)
   }
 
   if (delim === '(' || delim === ')') {
-    return /[\(\)]/
+    return char => /[\(\)]/.test(char)
   }
 
   if (delim === '<' || delim === '>') {
-    return /[<>]/
+    return char => /[<>]/.test(char)
   }
 
-  return delim
+  return char => char === delim
+}
+
+function split(str, delim) {
+  const test = delimiterTestFn(delim)
+  const args = []
+  let buffer = ''
+  let isEscaped = false
+  for (const char of str) {
+    if (isEscaped) {
+      buffer += char
+      isEscaped = false
+      continue
+    }
+
+    if (char === '\\') {
+      isEscaped = true
+      continue
+    }
+
+    if (test(char)) {
+      args.push(buffer)
+      buffer = ''
+    } else {
+      buffer += char
+    }
+  }
+
+  if (buffer.length) {
+    args.push(buffer)
+  }
+
+  return args
 }
 
 function unescape(str) {
@@ -1450,7 +1482,7 @@ function unescape(str) {
 }
 
 function parseRuleArgs(rule) {
-  const command = rule.match(/^(\w+\b|\d+|!p(?:rint)?)(.)/)
+  const command = rule.match(/^(!?\w+\b|\d+)(.)/)
   if (!command) {
     const [simpleCommand] = rule.match(/^(\w+\b|\d+|!p(?:rint)?)$/) ?? []
     if (!simpleCommand) {
@@ -1460,11 +1492,10 @@ function parseRuleArgs(rule) {
   }
 
   const [cmd, delim] = [command[1], command[2]]
-  const [, ...args] = rule
-    .slice(delim.length)
-    .split(toDelimiterRegex(delim))
-    .map(unescape)
-  const [pattern, replace, ...rest] = args
+  const argsString = rule
+    .slice(command[0].length)
+  const splitArgs = split(argsString, delim)
+  const [pattern, replace, ...rest] = splitArgs.map(unescape)
 
   return [cmd.toLowerCase(), pattern, replace, rest, delim]
 }
