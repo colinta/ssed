@@ -17,6 +17,53 @@ function requireArg(name, value) {
   }
 }
 
+class LineRule {
+  delim = ''
+  pattern = ''
+  replace
+  args
+
+  constructor(delim, pattern, replace, args) {
+    this.delim = delim
+    this.pattern = pattern
+    this.replace = replace
+    this.args = args
+  }
+
+  /**
+   * Run before any lines are processed
+   */
+  before(state) {}
+  /**
+   * Run before every line
+   */
+  beforeEach(line, state) {}
+  /**
+   * Runs on every line, even if previous rules returned null/undefined
+   */
+  run(line, lineNo, _state) {
+    if (line != null) {
+      return this.line(line, lineNo)
+    }
+  }
+  /**
+   * Should only run on lines that have text, even if the text is ''
+   */
+  line(line, _lineNo) {}
+  /**
+   * Run after every line (or lines, if a rule returns multiple lines)
+   */
+  afterEach(line, state) {}
+  /**
+   * Run after all lines have processed.
+   */
+  after(state) {}
+
+  explain() {
+    return ''
+  }
+}
+
 /**
  * Performs a single substitution on every line that matches. Use gsub to replace
  * multiple substitutions perline.
@@ -40,32 +87,34 @@ function requireArg(name, value) {
  *                          is
  *                          text
  */
-function substitutionRule(delim, pattern, replace) {
-  requireArg('pattern', pattern)
-  replace ??= ''
+class SubstitutionRule extends LineRule {
+  constructor(delim, pattern, replace, args) {
+    replace ??= ''
+    requireArg('pattern', pattern)
 
-  if (delim === ':') {
-    const lineRangeTest = toLineRangeTest(pattern)
+    super(delim, pattern, replace, args)
 
-    return (line, lineNo) => {
-      if (lineRangeTest(line, lineNo)) {
-        return replace
+    if (delim === ':') {
+      const lineRangeTest = toLineRangeTest(pattern)
+      this.line = (line, lineNo) => {
+        if (lineRangeTest(line, lineNo)) {
+          return replace
+        }
+        return line
       }
-
-      return line
+    } else {
+      const regex = new RegExp(pattern)
+      this.line = line => line.replace(regex, replace)
     }
   }
 
-  const regex = new RegExp(pattern)
-  return line => line.replace(regex, replace)
-}
-
-substitutionRule.explain = (delim, pattern, replace) => {
-  return `Replace ${explainPattern(
-    delim,
-    pattern,
-    'pattern',
-  )} with '${replace}'`
+  explain() {
+    return `Replace ${explainPattern(
+      this.delim,
+      this.pattern,
+      'pattern',
+    )} with '${this.replace}'`
+  }
 }
 
 /**
@@ -83,28 +132,27 @@ substitutionRule.explain = (delim, pattern, replace) => {
  *     this is text | gsub/t/T => This is TexT
  *     this is text | g|t|T => This is Text
  */
-function globalSubstitutionRule(delim, pattern, replace) {
-  requireArg('pattern', pattern)
-  requireArg('replace', replace)
+class GlobalSubstitutionRule extends LineRule {
+  constructor(delim, pattern, replace) {
+    if (delim === ':') {
+      throw `'gsub' does not support line numbers (use 'sub')`
+    }
 
-  if (delim === ':') {
-    throw Error(`'gsub' does not support '${delim}' delimiter (use 'sub')`)
+    replace ??= ''
+    requireArg('pattern', pattern)
+    super(delim, pattern, replace ?? '', [])
+
+    const regex = new RegExp(pattern, 'g')
+    this.line = line => line.replace(regex, replace)
   }
 
-  const regex = new RegExp(pattern, 'g')
-  return line => line.replace(regex, replace)
-}
-
-globalSubstitutionRule.explain = (delim, pattern, replace) => {
-  if (delim === ':') {
-    throw Error(`'gsub' does not support '${delim}' delimiter (use 'sub')`)
+  explain() {
+    return `Replace all matches of ${explainPattern(
+      this.delim,
+      this.pattern,
+      'pattern',
+    )} with '${this.replace}'`
   }
-
-  return `Replace ${explainPattern(
-    delim,
-    pattern,
-    'pattern',
-  )} with '${replace}' (all matches)`
 }
 
 /**
@@ -123,36 +171,29 @@ globalSubstitutionRule.explain = (delim, pattern, replace) => {
  *     this is text | take/t\w+ => this
  *     this is text | t/t\w+ => this
  *     how now      | take/t\w+ => how now
- *
- * @example Using line numbers
- *     this
- *     is
- *     text | take:1 => this
  */
-function takeRule(delim, pattern) {
-  requireArg('pattern', pattern)
+class TakeRule extends LineRule {
+  constructor(delim, pattern) {
+    if (delim === ':') {
+      throw `'take' does not support line numbers`
+    }
 
-  if (delim === ':') {
-    throw Error(`'take' does not support '${delim}' delimiter`)
+    super(delim, pattern, '', [])
+
+    const regex = new RegExp(pattern)
+    this.line = line => {
+      const match = line.match(regex)
+      return match ? match[0] : line
+    }
   }
 
-  const regex = new RegExp(pattern)
-  return line => {
-    const match = line.match(regex)
-    return match ? match[0] : line
+  explain() {
+    return `If the line matches ${explainPattern(
+      this.delim,
+      this.pattern,
+      'pattern',
+    )}, only print the matching part of the line.`
   }
-}
-
-takeRule.explain = (delim, pattern) => {
-  if (delim === ':') {
-    throw Error(`'take' does not support '${delim}' delimiter`)
-  }
-
-  return `If the line matches ${explainPattern(
-    delim,
-    pattern,
-    'pattern',
-  )}, only print the matching part of the line.`
 }
 
 /**
@@ -167,30 +208,26 @@ takeRule.explain = (delim, pattern) => {
  *
  * @example Using regex
  *     this is text | rm/^\w+ is/ => text
- *
- * @example Using line numbers
- *     this
- *     is
- *     text | rm:1 => is
- *                    text
  */
-function removeRule(delim, pattern) {
-  requireArg('pattern', pattern)
+class RemoveRule extends LineRule {
+  constructor(delim, pattern) {
+    if (delim === ':') {
+      throw `'rm' does not support line numbers`
+    }
 
-  if (delim === ':') {
-    throw Error(`'rm' does not support '${delim}' delimiter`)
+    super(delim, pattern, '', [])
+
+    const regex = new RegExp(pattern)
+    this.line = line => line.replace(regex, '')
   }
 
-  const regex = new RegExp(pattern)
-  return line => line.replace(regex, '')
-}
-
-removeRule.explain = (delim, pattern) => {
-  if (delim === ':') {
-    throw Error(`'rm' does not support '${delim}' delimiter`)
+  explain() {
+    return `Remove ${explainPattern(
+      this.delim,
+      this.pattern,
+      'pattern',
+    )} from every line`
   }
-
-  return `Remove ${explainPattern(delim, pattern, 'pattern')} from every line`
 }
 
 /**
@@ -218,22 +255,26 @@ removeRule.explain = (delim, pattern) => {
  *     text | print:2-3 => is
  *                         text
  */
-function printRule(delim, pattern) {
-  pattern ??= ''
+class PrintRule extends LineRule {
+  constructor(delim, pattern) {
+    pattern ??= ''
+    super(delim, pattern, '', [])
 
-  let check = () => true
-  if (delim === ':') {
-    check = toLineRangeTest(pattern)
-  } else {
-    const regex = new RegExp(pattern)
-    check = line => line.match(regex)
+    if (delim === ':') {
+      this.check = toLineRangeTest(pattern)
+    } else {
+      const regex = new RegExp(pattern)
+      this.check = line => line.match(regex)
+    }
   }
 
-  return (line, lineNo) => (check(line, lineNo) ? line : undefined)
-}
+  line(line, lineNo) {
+    return this.check(line, lineNo) ? line : undefined
+  }
 
-printRule.explain = (delim, pattern) => {
-  return `Print ${explainPattern(delim, pattern, 'matching-lines')}`
+  explain() {
+    return `Print ${explainPattern(this.delim, this.pattern, 'matching-lines')}`
+  }
 }
 
 /**
@@ -263,27 +304,29 @@ printRule.explain = (delim, pattern) => {
  *     text | kill:1 => is
  *                      text
  */
-function killRule(delim, pattern) {
-  requireArg('pattern', pattern)
+class KillRule extends LineRule {
+  constructor(delim, pattern, replace, args) {
+    super(delim, pattern, replace, args)
 
-  if (delim === ':') {
-    const lineRangeTest = toLineRangeTest(pattern)
-
-    return (line, lineNo) => {
-      if (lineRangeTest(line, lineNo)) {
-        return
-      }
-
-      return line
+    if (delim === ':') {
+      this.check = toLineRangeTest(pattern)
+    } else {
+      const regex = new RegExp(pattern)
+      this.check = line => line.match(regex)
     }
   }
 
-  const regex = new RegExp(pattern)
-  return line => (line.match(regex) ? undefined : line)
-}
+  line(line, lineNo) {
+    return this.check(line, lineNo) ? undefined : line
+  }
 
-killRule.explain = (delim, pattern) => {
-  return `Remove ${explainPattern(delim, pattern, 'matching-lines')}`
+  explain() {
+    return `Remove ${explainPattern(
+      this.delim,
+      this.pattern,
+      'matching-lines',
+    )}`
+  }
 }
 
 /**
@@ -315,47 +358,48 @@ killRule.explain = (delim, pattern) => {
  *     does anyone know bob? | uniq/\w+\? => who is alice?
  *                                           do you know bob?
  */
-function uniqueRule(delim, pattern) {
-  requireArg('pattern', pattern)
+class UniqueRule extends LineRule {
+  constructor(delim, pattern, replace, args) {
+    super(delim, pattern, replace, args)
 
-  if (delim === ':') {
-    throw Error(`'uniq' does not support '${delim}' delimiter`)
-  }
-
-  const lines = new Set()
-  let part = line => line
-  if (pattern) {
-    const regex = new RegExp(pattern)
-    part = line => line.match(regex)?.[0]
-  }
-
-  return line => {
-    const match = part(line)
-    if (match == null) {
-      return null
+    if (delim === ':') {
+      throw Error(`'uniq' does not support line numbers`)
     }
 
-    if (!lines.has(match)) {
-      lines.add(match)
-      return line
+    if (pattern) {
+      const regex = new RegExp(pattern)
+      this.part = line => {
+        const match = line.match(regex)
+        return match ? match[0] : null
+      }
+    } else {
+      this.part = line => line
+    }
+
+    const uniqueLines = new Set()
+    this.line = line => {
+      const match = this.part(line)
+      if (match == null) {
+        return null
+      }
+
+      if (!uniqueLines.has(match)) {
+        uniqueLines.add(match)
+        return line
+      }
     }
   }
-}
 
-uniqueRule.explain = (delim, pattern) => {
-  if (delim === ':') {
-    throw Error(`'uniq' does not support '${delim}' delimiter`)
+  explain() {
+    if (this.pattern) {
+      return `Only print lines that match ${explainPattern(
+        this.delim,
+        this.pattern,
+        'pattern',
+      )}. Uniqueness is determined by the matching part of the line. The entire line is printed.`
+    }
+    return 'Only print unique lines'
   }
-
-  if (pattern) {
-    return `Only print lines that match ${explainPattern(
-      delim,
-      pattern,
-      'pattern',
-    )}. Uniqueness is determined by the matching part of the line. The entire line is printed.`
-  }
-
-  return 'Only print unique lines'
 }
 
 /**
@@ -381,34 +425,71 @@ uniqueRule.explain = (delim, pattern) => {
  *                                      |line 2|
  *                                      |   line 3|
  */
-function trimRule(delim, pattern) {
-  requireArg('pattern', pattern)
+class TrimRule extends LineRule {
+  constructor(delim, pattern, replace, args) {
+    super(delim, pattern, replace, args)
+    if (delim === ':') {
+      throw `'trim' does not support line numbers`
+    }
 
-  if (delim === ':') {
-    throw Error(`'trim' does not support '${delim}' delimiter`)
+    // Set the appropriate trim function based on the pattern
+    switch (pattern) {
+      case 'left':
+        this.trim = line => line.replace(/^\s+/, '')
+        break
+      case 'right':
+        this.trim = line => line.replace(/\s+$/, '')
+        break
+      case 'both':
+      default:
+        this.trim = line => line.trim()
+        break
+    }
+
+    this.line = line => this.trim(line)
   }
 
-  let trim = line => line.trim()
-  if (pattern === 'left') {
-    trim = line => line.replace(/^\s+/, '')
-  } else if (pattern === 'right') {
-    trim = line => line.replace(/\s+$/, '')
-  } else if (pattern && pattern !== 'both') {
-    // error
-    throw Error(`Invalid trim rule: '${pattern}'`)
+  explain() {
+    switch (this.pattern) {
+      case 'left':
+        return 'Trim whitespace from the left side of the line'
+      case 'right':
+        return 'Trim whitespace from the right side of the line'
+      default:
+        return 'Trim whitespace from both sides of the line'
+    }
   }
-
-  return line => trim(line)
 }
 
-trimRule.explain = (delim, pattern) => {
-  if (pattern === 'left') {
-    return 'Trim whitespace from the left side of the line'
-  } else if (pattern === 'right') {
-    return 'Trim whitespace from the right side of the line'
+/**
+ * Surround each line with text.
+ *
+ * Usage:
+ *    ssed surround/{prepend}/{append}
+ *
+ * @example
+ *     1
+ *     2
+ *     3
+ *     4 | 'surround:->:<-' => ->1<-
+ *                             ->2<-
+ *                             ->3<-
+ *                             ->4<-
+ */
+class SurroundRule extends LineRule {
+  constructor(delim, prepend, append, args) {
+    super(delim, '', '', args) // pattern and replace are not used in this rule
+    this.prepend = prepend
+    this.append = append
   }
 
-  return 'Trim whitespace from both sides of the line'
+  line(line) {
+    return this.prepend + line + this.append
+  }
+
+  explain() {
+    return `Surround each line with '${this.prepend}' and '${this.append}'`
+  }
 }
 
 /**
@@ -429,12 +510,14 @@ trimRule.explain = (delim, pattern) => {
  *                            line 3
  *                            line 4
  */
-function prependRule(prependText) {
-  return surroundRule(prependText, '')
-}
+class PrependRule extends SurroundRule {
+  constructor(delim, prependText, args) {
+    super(delim, prependText, '', args)
+  }
 
-prependRule.explain = (delim, pattern) => {
-  return `Prepend each line with '${pattern}'`
+  explain() {
+    return `Prepend each line with '${this.prepend}'`
+  }
 }
 
 /**
@@ -455,35 +538,14 @@ prependRule.explain = (delim, pattern) => {
  *                          3 foo
  *                          4 foo
  */
-function appendRule(appendText) {
-  return surroundRule('', appendText)
-}
+class AppendRule extends SurroundRule {
+  constructor(delim, appendText, args) {
+    super(delim, '', appendText, args)
+  }
 
-appendRule.explain = (delim, pattern) => {
-  return `Append each line with '${pattern}'`
-}
-
-/**
- * Surround each line with text.
- *
- * Usage:
- *    ssed surround/{prepend}/{append}
- *
- * @example
- *     1
- *     2
- *     3
- *     4 | 'surround:->:<-' => ->1<-
- *                             ->2<-
- *                             ->3<-
- *                             ->4<-
- */
-function surroundRule(prepend, append) {
-  return line => prepend + line + append
-}
-
-surroundRule.explain = (delim, prepend, append) => {
-  return `Surround each line with '${prepend}' and '${append}'`
+  explain() {
+    return `Append each line with '${this.append}'`
+  }
 }
 
 /**
@@ -501,29 +563,32 @@ surroundRule.explain = (delim, prepend, append) => {
  *                            ->3<-
  *                            ->4<-
  */
-function insertRule(delim, pattern, text) {
-  requireArg('pattern', pattern)
-  requireArg('text', text)
+class InsertRule extends LineRule {
+  constructor(delim, pattern, text, args) {
+    requireArg('pattern', pattern)
+    requireArg('text', text)
 
-  let check = () => true
-  if (delim === ':') {
-    check = toLineRangeTest(pattern)
-  } else {
-    const regex = new RegExp(pattern)
-    check = line => line.match(regex)
+    super(delim, pattern, text, args)
+    if (delim === ':') {
+      this.check = toLineRangeTest(pattern)
+    } else {
+      const regex = new RegExp(pattern)
+      this.check = line => line.match(regex)
+    }
   }
 
-  return (line, lineNo) => {
-    if (check(line, lineNo)) {
-      return [line, text]
+  line(line, lineNo) {
+    if (this.check(line, lineNo)) {
+      return [line, this.replace] // this.replace holds the text to be inserted
     }
-
     return line
   }
-}
 
-insertRule.explain = (delim, pattern, text) => {
-  return `After ${explainPattern(delim, pattern)} insert '${text}'`
+  explain() {
+    return `After ${explainPattern(this.delim, this.pattern)} insert '${
+      this.replace
+    }'`
+  }
 }
 
 /**
@@ -552,84 +617,94 @@ insertRule.explain = (delim, pattern, text) => {
  *                               c   # still "on", turned off by matching 'd'
  *                               g   # off until 'f', then turned on starting at next line
  */
-function controlPrintingRule(cmd, delim, pattern) {
-  pattern ??= ''
+class ControlPrintingRule extends LineRule {
+  constructor(cmd, delim, pattern, args) {
+    requireArg('pattern', pattern)
 
-  let check = (_line, _lineNo) => true
-  if (delim === ':') {
-    check = toLineRangeTest(pattern)
-  } else {
-    const regex = new RegExp(pattern)
-    check = line => Boolean(line.match(regex))
+    super(delim, pattern, '', args)
+
+    this.cmd = cmd
+    if (delim === ':') {
+      this.check = this.toLineRangeTest(pattern)
+    } else {
+      const regex = new RegExp(pattern)
+      this.check = line => !!line.match(regex)
+    }
   }
 
-  return {
-    beforeEach(line, state) {
+  beforeEach(line, state) {
+    state.suppressedLine = null
+
+    if (state.printOn == null) {
+      if (this.cmd === 'on') {
+        state.printOn = false
+      } else if (this.cmd === 'off' || this.cmd === 'toggle') {
+        state.printOn = true
+      }
+    }
+  }
+
+  run(line, lineNo, state) {
+    if (
+      this.cmd === 'on' &&
+      state.suppressedLine != null &&
+      this.check(state.suppressedLine, lineNo)
+    ) {
+      state.printOn = true
+      line = state.suppressedLine
+    } else if (
+      this.cmd === 'on' &&
+      line != null &&
+      (state.printOn || this.check(line, lineNo))
+    ) {
+      state.printOn = true
+    } else if (this.cmd === 'off' && state.printOn && this.check(line, lineNo)) {
+      state.printOn = false
+    } else if (this.cmd === 'toggle' && this.check(line, lineNo)) {
+      state.printOn = !state.printOn
+    }
+
+    if (state.printOn) {
       state.suppressedLine = null
-    },
-    line: (line, lineNo, state) => {
-      if (cmd === 'on' && state.printOn == null) {
-        state.printOn = false
-      } else if (cmd === 'toggle' && state.printOn == null) {
-        state.printOn = true
-      } else if (cmd === 'off' && state.printOn == null) {
-        state.printOn = true
-      }
+      return line
+    } else {
+      state.suppressedLine ??= line
+    }
 
-      if (
-        cmd === 'on' &&
-        state.suppressedLine != null &&
-        !state.printOn &&
-        check(state.suppressedLine, lineNo)
-      ) {
-        state.printOn = true
-        line = state.suppressedLine
-      } else if (cmd === 'on' && (state.printOn || check(line, lineNo))) {
-        state.printOn = true
-      } else if (cmd === 'off' && check(line, lineNo)) {
-        state.printOn = false
-      } else if (cmd === 'toggle' && check(line, lineNo)) {
-        state.printOn = !state.printOn
-      }
-
-      if (state.printOn) {
-        state.suppressedLine = null
-        return line
-      } else {
-        state.suppressedLine ??= line
-      }
-
-      if (
-        cmd === 'after' &&
-        state.suppressedLine != null &&
-        !state.printOn &&
-        check(state.suppressedLine, lineNo)
-      ) {
-        state.printOn = true
-      } else if (cmd === 'after' && check(line, lineNo)) {
-        state.printOn = true
-      }
-    },
-  }
-}
-
-controlPrintingRule.explain = (cmd, delim, pattern) => {
-  const matchingLines = explainPattern(delim, pattern, 'matching-lines')
-
-  if (cmd === 'on') {
-    return `Printing starts off, and is turned on at ${matchingLines}`
+    if (
+      this.cmd === 'after' &&
+      state.suppressedLine != null &&
+      !state.printOn &&
+      this.check(state.suppressedLine, lineNo)
+    ) {
+      state.printOn = true
+    } else if (this.cmd === 'after' && this.check(line, lineNo)) {
+      state.printOn = true
+    }
   }
 
-  if (cmd === 'off') {
-    return `Printing starts on, and is turned off at ${matchingLines}`
-  }
+  explain() {
+    const matchingLines = explainPattern(
+      this.delim,
+      this.pattern,
+      'matching-lines',
+    )
 
-  if (cmd === 'toggle') {
-    return `Printing starts on, and is toggled at ${matchingLines}`
-  }
+    if (this.cmd === 'on') {
+      return `Printing starts off, and is turned on at ${matchingLines}`
+    }
 
-  // cmd === 'after'
-  return `Printing starts off, and is turned on after ${matchingLines}`
+    if (this.cmd === 'off') {
+      return `Printing starts on, and is turned off at ${matchingLines}`
+    }
+
+    if (this.cmd === 'toggle') {
+      return `Printing starts on, and is toggled at ${matchingLines}`
+    }
+
+    // cmd === 'after'
+    return `Printing starts off, and is turned on after ${matchingLines}`
+  }
 }
 
 /**
@@ -652,39 +727,40 @@ controlPrintingRule.explain = (cmd, delim, pattern) => {
  *     text | 1/\w(\w+)$ => ext
  *     this is text | 2/(\w+) (\w+) (\w+) => is
  */
-function groupMatchRule(index, delim, pattern) {
-  if (delim === ':') {
-    throw Error(`'${index}' does not support '${delim}' delimiter`)
-  }
+class GroupMatchRule extends LineRule {
+  constructor(index, delim, pattern) {
+    super(delim, pattern, '', [])
+    this.index = index
 
-  if (!pattern) {
-    return line => {
-      const match = line.split(/\s+/, index)
-      return match.length >= index - 1 ? match[index - 1] : line
+    if (delim === ':') {
+      throw `'${index}' does not support line numbers`
+    }
+
+    if (!pattern) {
+      this.line = line => {
+        const match = line.split(/\s+/, index)
+        return match.length >= index - 1 ? match[index - 1] : line
+      }
+    } else {
+      const regex = new RegExp(pattern)
+      this.line = line => {
+        const match = line.match(regex)
+        return match && match[index] ? match[index] : line
+      }
     }
   }
 
-  const regex = new RegExp(pattern)
-  return line => {
-    const match = line.match(regex)
-    return match && match[index] ? match[index] : line
-  }
-}
+  explain() {
+    if (!this.pattern) {
+      return `Print column #${this.index}, columns are separated by whitespace`
+    }
 
-groupMatchRule.explain = (index, delim, pattern) => {
-  if (delim === ':') {
-    throw Error(`'${index}' does not support '${delim}' delimiter`)
+    return `Replace ${explainPattern(
+      this.delim,
+      this.pattern,
+      'pattern',
+    )} with group #${this.index}`
   }
-
-  if (!pattern) {
-    return `Print column #${index}, columns are separated by whitespace`
-  }
-
-  return `Replace ${explainPattern(
-    delim,
-    pattern,
-    'pattern',
-  )} with group #${index}`
 }
 
 /**
@@ -705,45 +781,86 @@ groupMatchRule.explain = (index, delim, pattern) => {
  *     this    is    text | cols//2,1,3 => is this text
  *     1:bb:3:4:Z | cols/:/1,3,2 => 1 3 bb
  */
-function columnsRule(delim, pattern, columns, joiner) {
-  pattern ??= ''
-  requireArg('columns', columns)
+class ColumnsRule extends LineRule {
+  constructor(delim, pattern, columns, args) {
+    pattern ??= ''
+    super(delim, pattern, '', [])
 
-  if (delim === ':') {
-    throw Error(`'cols' does not support '${delim}' delimiter`)
+    requireArg('columns', columns)
+
+    if (delim === ':') {
+      throw new Error(`'cols' does not support line numbers`)
+    }
+
+    this.columns = columns.split(',').map(Number)
+    const regex = pattern === '' ? /\s+/ : new RegExp(pattern)
+    this.joiner = args[0] ?? ' '
+
+    this.line = line => {
+      const parts = line.split(regex)
+      return this.columns.map(index => parts[index - 1] ?? '').join(this.joiner)
+    }
   }
 
-  columns = columns.split(',').map(Number)
-  const regex = pattern === '' ? /\s+/ : new RegExp(pattern)
-  return line => {
-    const match = line.match(regex)
-    if (match) {
-      return columns.map(index => match[index - 1] ?? '').join(joiner ?? ' ')
+  explain() {
+    let explanation = ''
+    if (this.pattern) {
+      explanation = `Split each line into columns using ${explainPattern(
+        this.delim,
+        this.pattern,
+        'pattern',
+      )}`
+    } else {
+      explanation = 'Split each line into columns by whitespace'
     }
+
+    explanation += ` and print columns ${this.columns.join(', ')}`
+
+    if (this.joiner) {
+      explanation += ` joined by '${this.joiner}'`
+    } else {
+      explanation += ` joined by ' '`
+    }
+
+    return explanation
   }
 }
 
-columnsRule.explain = (delim, pattern, columns, joiner) => {
-  let explain = ''
-  if (pattern) {
-    explain = `Split each line into columns using ${explainPattern(
-      '/',
-      pattern,
-      'pattern',
-    )}'`
-  } else {
-    explain = 'Split each line into columns by whitespace'
+class CombineRule extends LineRule {
+  constructor(rule1, rule2) {
+    super('', '', '', []) // Delim, pattern, replace, and args are not directly used in CombineRule
+    this.rule1 = rule1
+    this.rule2 = rule2
   }
 
-  explain += ` and print columns ${columns}`
-
-  if (joiner) {
-    explain += ` joined by '${joiner}'`
-  } else {
-    explain += ` joined by ' '`
+  before(state) {
+    this.rule1.before(state)
+    this.rule2.before(state)
   }
 
-  return explain
+  beforeEach(line, state) {
+    this.rule1.beforeEach(line, state)
+    this.rule2.beforeEach(line, state)
+  }
+
+  run(line, lineNo, state) {
+    const result = this.rule1.run(line, lineNo, state)
+    return this.rule2.run(result, lineNo, state)
+  }
+
+  afterEach(line, state) {
+    this.rule1.afterEach(line, state)
+    this.rule2.afterEach(line, state)
+  }
+
+  after(state) {
+    this.rule1.after(state)
+    this.rule2.after(state)
+  }
+
+  explain() {
+    return `${this.rule1.explain()}\n${this.rule2.explain()}`
+  }
 }
 
 function toLineRule([cmd, pattern, replace, rest, delim]) {
@@ -751,37 +868,30 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
   switch (cmd) {
     case 'sub':
     case 's':
-      rule = substitutionRule(delim, pattern, replace)
+      rule = new SubstitutionRule(delim, pattern, replace)
       break
     case 'gsub':
     case 'g':
-      rule = globalSubstitutionRule(delim, pattern, replace)
+      rule = new GlobalSubstitutionRule(delim, pattern, replace)
       break
     case 'take':
     case 't':
-      rule = takeRule(delim, pattern)
+      rule = new TakeRule(delim, pattern)
       break
     case 'rm':
     case 'r':
-      rule = removeRule(delim, pattern)
+      rule = new RemoveRule(delim, pattern, replace)
       break
     case 'print':
     case 'p':
-      rule = printRule(delim, pattern)
+      rule = new PrintRule(delim, pattern, replace)
       break
     case 'takeprint':
     case 'pt':
     case 'tp': {
-      const take = takeRule(delim, pattern)
-      const print = printRule(delim, pattern)
-      rule = (line, lineNo) => {
-        const printLine = print(line, lineNo)
-        if (printLine == null) {
-          return printLine
-        }
-
-        return take(printLine)
-      }
+      const take = new TakeRule(delim, pattern)
+      const print = new PrintRule(delim, pattern)
+      rule = new CombineRule(take, print)
       break
     }
     case 'rmprint':
@@ -789,62 +899,51 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
     case 'rp': {
       const remove = removeRule(delim, pattern)
       const print = printRule(delim, pattern)
-      rule = (line, lineNo) => {
-        const printLine = print(line, lineNo)
-        if (printLine == null) {
-          return printLine
-        }
-
-        return remove(printLine)
-      }
+      rule = new CombineRule(remove, print)
       break
     }
     case 'kill':
     case 'k':
     case '!p':
     case '!print':
-      rule = killRule(delim, pattern)
+      rule = new KillRule(delim, pattern)
       break
     case 'uniq':
     case 'unique':
-      rule = uniqueRule(delim, pattern)
+      rule = new UniqueRule(delim, pattern)
       break
     case 'trim':
-      rule = trimRule(delim, pattern)
+      rule = new TrimRule(delim, pattern)
       break
     case 'prepend':
     case 'prefix':
-      rule = prependRule(pattern)
+      rule = new PrependRule(pattern)
       break
     case 'append':
     case 'suffix':
-      rule = appendRule(pattern)
+      rule = new AppendRule(pattern)
       break
     case 'surround':
-      rule = surroundRule(pattern, replace)
+      rule = new SurroundRule(pattern, replace)
       break
     case 'insert':
-      rule = insertRule(delim, pattern, replace)
+      rule = new InsertRule(delim, pattern, replace)
       break
     case 'on':
     case 'off':
     case 'after':
     case 'toggle':
-      rule = controlPrintingRule(cmd, delim, pattern)
+      rule = new ControlPrintingRule(cmd, delim, pattern)
       break
     case 'cols':
-      rule = columnsRule(delim, pattern, replace, rest[0])
+      rule = new ColumnsRule(delim, pattern, replace, rest[0])
       break
     default:
       if (cmd.match(/^\d+$/)) {
         const index = parseInt(cmd)
-        rule = groupMatchRule(index, delim, pattern)
+        rule = new GroupMatchRule(index, delim, pattern)
       }
       break
-  }
-
-  if (rule instanceof Function) {
-    return {line: rule}
   }
 
   return rule
@@ -1374,8 +1473,12 @@ function processLines(
 
     let mappedLines = [line]
     for (const lineRule of lineRules) {
+      if (mappedLines.length === 0) {
+        mappedLines = [null]
+      }
+
       mappedLines = mappedLines.flatMap(line => {
-        const nextLines = lineRule.line(line, state.lineNumber, state)
+        const nextLines = lineRule.run(line, state.lineNumber, state)
         if (nextLines == null) {
           return []
         } else if (Array.isArray(nextLines)) {
@@ -1384,10 +1487,6 @@ function processLines(
           return [nextLines]
         }
       })
-
-      if (mappedLines.length === 0) {
-        break
-      }
     }
 
     for (const lineRule of lineRules) {
