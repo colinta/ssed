@@ -39,6 +39,10 @@ class Rule {
    * Run after all lines have processed.
    */
   after(state, options) {}
+
+  explain() {
+    return ''
+  }
 }
 
 class LineRule extends Rule {
@@ -62,10 +66,22 @@ class LineRule extends Rule {
    * Run after every line (or lines, if a rule returns multiple lines)
    */
   afterEach(line, state, options) {}
+}
 
-  explain() {
-    return ''
+class DocumentRule extends Rule {
+  /**
+   * Runs on every rule, even if there are no lines.
+   */
+  run(documentLines, state, options) {
+    if (documentLines.length) {
+      return this.lines(documentLines, state, options)
+    }
   }
+
+  /**
+   * lines is an array of [line, lineNo]
+   */
+  lines(documentLines, state, options) {}
 }
 
 /**
@@ -353,8 +369,8 @@ class PrintRule extends LineRule {
 class KillRule extends LineRule {
   check
 
-  constructor(delim, pattern, replace) {
-    super(delim, pattern, replace, [])
+  constructor(delim, pattern) {
+    super(delim, pattern, '', [])
 
     if (delim === ':') {
       this.check = toLineRangeTest(pattern)
@@ -411,8 +427,8 @@ class KillRule extends LineRule {
 class UniqueRule extends LineRule {
   part
 
-  constructor(delim, pattern, replace) {
-    super(delim, pattern, replace, [])
+  constructor(delim, pattern) {
+    super(delim, pattern, '', [])
 
     if (delim === ':') {
       throw Error(`'uniq' does not support line numbers`)
@@ -484,8 +500,8 @@ class UniqueRule extends LineRule {
 class TrimRule extends LineRule {
   trim
 
-  constructor(delim, pattern, replace) {
-    super(delim, pattern, replace, [])
+  constructor(delim, pattern) {
+    super(delim, pattern, '', [])
     if (delim === ':') {
       throw Error(`'trim' does not support line numbers`)
     }
@@ -974,11 +990,11 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
       break
     case 'rm':
     case 'r':
-      rule = new RemoveRule(delim, pattern, replace)
+      rule = new RemoveRule(delim, pattern)
       break
     case 'print':
     case 'p':
-      rule = new PrintRule(delim, pattern, replace)
+      rule = new PrintRule(delim, pattern)
       break
     case 'takeprint':
     case 'pt':
@@ -991,8 +1007,8 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
     case 'rmprint':
     case 'pr':
     case 'rp': {
-      const remove = removeRule(delim, pattern)
-      const print = printRule(delim, pattern)
+      const remove = new RemoveRule(delim, pattern)
+      const print = new PrintRule(delim, pattern)
       rule = new CombineRules(remove, print)
       break
     }
@@ -1030,7 +1046,7 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
       rule = new ControlPrintingRule(cmd, delim, pattern)
       break
     case 'cols':
-      rule = new ColumnsRule(delim, pattern, replace, rest[0])
+      rule = new ColumnsRule(delim, pattern, replace, rest)
       break
     default:
       if (cmd.match(/^\d+$/)) {
@@ -1043,44 +1059,69 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
   return rule
 }
 
-function documentSortRule(pattern, replace, ascending) {
-  const regex = pattern && new RegExp(pattern)
-  return documentLines => {
-    return documentLines.toSorted(([a], [b]) => {
-      if (regex) {
-        let aMatch = a.match(regex)
-        let bMatch = b.match(regex)
-        if (aMatch && bMatch) {
-          if (replace != null) {
-            aMatch = a.replace(regex, replace)
-            bMatch = b.replace(regex, replace)
+class DocumentSortRule extends DocumentRule {
+  ascending
+
+  constructor(pattern, replace, ascending = true) {
+    super('', pattern, replace, []);
+
+    const regex = pattern && new RegExp(pattern);
+    this.ascending = ascending;
+    this.lines = (documentLines) =>
+      documentLines
+      .map(([line]) => line)
+      .toSorted((a, b) => {
+        if (regex) {
+          let aMatch = a.match(regex);
+          let bMatch = b.match(regex);
+          if (aMatch && bMatch) {
+            if (this.replace) {
+              aMatch = a.replace(regex, this.replace);
+              bMatch = b.replace(regex, this.replace);
+            } else {
+              aMatch = aMatch[0];
+              bMatch = bMatch[0];
+            }
+
+            return aMatch.localeCompare(bMatch) * (this.ascending ? 1 : -1);
           } else {
-            aMatch = aMatch[0]
-            bMatch = bMatch[0]
+            return 0;
           }
-
-          return aMatch.localeCompare(bMatch) * (ascending ? 1 : -1)
-        } else {
-          return 0
         }
-      }
 
-      return a.localeCompare(b) * (ascending ? 1 : -1)
-    })
+        return a.localeCompare(b) * (this.ascending ? 1 : -1);
+      });
+  }
+
+  explain() {
+    const leading = `Sort lines in${this.ascending ? '' : ' reverse'} alphabetical order`
+    if (this.pattern && this.replace) {
+      return `${leading} based on the matching part of ${explainPattern(this.delim, this.pattern, 'pattern')} after replacing with '${this.replace}'`;
+    } else if (this.pattern) {
+      return `${leading} based on the matching part of ${explainPattern(this.delim, this.pattern, 'pattern')}`;
+    } else {
+      return leading;
+    }
   }
 }
 
-function documentSortNumericRule(pattern, replace, ascending) {
-  const regex = pattern && new RegExp(pattern)
-  return documentLines => {
-    return documentLines
-      .map(([line]) => line)
+class DocumentSortNumericRule extends DocumentRule {
+  ascending
+
+  constructor(pattern, replace, ascending = true) {
+    super('', pattern, replace, []);
+
+    const regex = pattern && new RegExp(pattern);
+    this.ascending = ascending;
+    this.lines = (documentLines) =>
+      documentLines
+        .map(([line]) => line)
       .toSorted((a, b) => {
         if (regex) {
           let aMatch = a.match(regex)
           let bMatch = b.match(regex)
           if (aMatch && bMatch) {
-            if (replace != null) {
+            if (replace) {
               a = a.replace(regex, replace)
               b = b.replace(regex, replace)
             } else {
@@ -1092,32 +1133,88 @@ function documentSortNumericRule(pattern, replace, ascending) {
           }
         }
 
-        const numberA = a.replace(/^.*?(-?\b\d+(\.\d*)?).*$/, '$1')
-        const numberB = b.replace(/^.*?(-?\b\d+(\.\d*)?).*$/, '$1')
+        let numberA = a.replace(/^.*?(-?\b\d+(\.\d*)?).*$/, '$1')
+        if (numberA.isNaN()) {
+          numberA = 0
+        }
+
+        let numberB = b.replace(/^.*?(-?\b\d+(\.\d*)?).*$/, '$1')
+        if (numberB.isNaN()) {
+          numberB = 0
+        }
 
         return (Number(numberA) - Number(numberB)) * (ascending ? 1 : -1)
-      })
+      });
+  }
+
+  explain() {
+    const leading = `Sort lines in${this.ascending ? '' : ' reverse'} numeric order`
+    if (this.pattern && this.replace) {
+      return `${leading} based on the matching part of ${explainPattern(this.delim, this.pattern, 'pattern')} after replacing with '${this.replace}'`;
+    } else if (this.pattern) {
+      return `${leading} based on the matching part of ${explainPattern(this.delim, this.pattern, 'pattern')}`;
+    } else {
+      return leading;
+    }
   }
 }
 
-function documentReverseRule() {
-  return documentLines => documentLines.toReversed()
+class DocumentReverseRule extends DocumentRule {
+  constructor() {
+    super('', '', '', []);
+  }
+
+  lines(documentLines) {
+    return documentLines.toReversed();
+  }
+
+  explain() {
+    return "Reverse the order of all lines";
+  }
 }
 
-function documentLineNumbersRule(pattern, replace) {
-  return documentLines => {
-    const max = documentLines.length.toString().length
-    return documentLines.map(([line, lineNo]) => {
-      let lineNoStr = lineNo.toString()
-      let pad
-      if (replace) {
-        pad = '0'.repeat(Math.max(Number(replace), max) - lineNoStr.length)
+class DocumentLineNumbersRule extends DocumentRule {
+  minWidth
+
+  constructor(pattern, replace) {
+    super('', pattern, null, []);
+
+    if (replace) {
+      const minWidth = replace ? Number(replace) : 0
+      if (minWidth.isNaN()) {
+        throw Error(`Invalid width '${replace}', expected a number`)
       } else {
-        pad = ' '.repeat(max - lineNoStr.length)
+        this.minWidth = minWidth
+        this.pad = '0'
       }
-      const joiner = pattern ?? ':'
-      return pad + lineNoStr + joiner + line
-    })
+    } else {
+      this.pad = ' '
+      this.minWidth = 0
+    }
+  }
+
+  lines(documentLines) {
+    const max = documentLines.length.toString().length;
+    return documentLines.map(([line, lineNo]) => {
+      let lineNoStr = lineNo.toString();
+      let pad;
+      if (this.replace) {
+        pad = '0'.repeat(Math.max(Number(this.replace), max) - lineNoStr.length);
+      } else {
+        pad = ' '.repeat(max - lineNoStr.length);
+      }
+      const joiner = this.pattern ?? ':';
+      return pad + lineNoStr + joiner + line;
+    });
+  }
+
+  explain() {
+    const leading = `Add line numbers to each line with '${this.pattern ?? ':'}' as separator`
+    if (this.minWidth) {
+      return ` and padding with '${this.replace ? '0' : 'spaces'}'`;
+    }
+
+    return leading
   }
 }
 
@@ -1125,55 +1222,61 @@ function documentLineNumbersRule(pattern, replace) {
  * Similar to the line substitution rule, but the substituted text is "spread"
  * across all the lines that match.
  */
-function documentSubstituteLinesRule(pattern, replace, delim) {
-  requireArg('pattern', pattern)
+class DocumentSubstituteLinesRule extends DocumentRule {
+  constructor(delim, pattern, replace) {
+    requireArg('pattern', pattern)
 
-  const replaceLines = replace.split('\n')
-  let index = 0
-  let test
+    super(delim, pattern, replace, [])
 
-  if (delim === ':') {
-    check = toLineRangeTest(pattern)
-  } else if (delim === '`') {
-    check = line => line.includes(pattern)
-  } else {
-    const regex = new RegExp(pattern)
-    check = line => line.match(regex)
+    let check
+    if (delim === ':') {
+      check = toLineRangeTest(pattern)
+    } else if (delim === '`') {
+      check = line => line.includes(pattern)
+    } else {
+      const regex = new RegExp(pattern)
+      check = line => line.match(regex)
+    }
+
+    const replaceLines = replace.split('\n')
+    this.lines = documentLines => {
+      const matchedLineNumbers = []
+      // find all the lines that match, put into matchedLineNumbers
+      // if (matchedLineNumbers >= replaceLines) {
+      //   remove extra matched lines
+      // } else (matchedLineNumbers < replaceLines) {
+      //   add matched lines 1:1 with replaceLines until we
+      //   get to the last matched line, then insert all
+      //   remaining lines
+      // }
+      documentLines.forEach(([line, lineNo]) => {
+        if (check(line, lineNo)) {
+          matchedLineNumbers.push(lineNo)
+        }
+      })
+
+      return documentLines.flatMap(([line, lineNo]) => {
+        if (matchedLineNumbers.length && matchedLineNumbers[0] === lineNo) {
+          matchedLineNumbers.shift()
+          if (matchedLineNumbers.length === 0) {
+            return replaceLines
+          } else {
+            const nextLine = replaceLines.shift()
+            if (nextLine == null) {
+              return []
+            } else {
+              return [nextLine]
+            }
+          }
+        }
+
+        return [line]
+      })
+    }
   }
 
-  return documentLines => {
-    const matchedLineNumbers = []
-    // find all the lines that match, put into matchedLineNumbers
-    // if (matchedLineNumbers >= replaceLines) {
-    //   remove extra matched lines
-    // } else (matchedLineNumbers < replaceLines) {
-    //   add matched lines 1:1 with replaceLines until we
-    //   get to the last matched line, then insert all
-    //   remaining lines
-    // }
-    documentLines.forEach(([line, lineNo]) => {
-      if (check(line, lineNo)) {
-        matchedLineNumbers.push(lineNo)
-      }
-    })
-
-    return documentLines.flatMap(([line, lineNo]) => {
-      if (matchedLineNumbers.length && matchedLineNumbers[0] === lineNo) {
-        matchedLineNumbers.shift()
-        if (matchedLineNumbers.length === 0) {
-          return replaceLines
-        }
-
-        const nextLine = replaceLines.shift()
-        if (nextLine == null) {
-          return []
-        } else {
-          return [nextLine]
-        }
-      }
-
-      return [line]
-    })
+  explain() {
+    return `Substitute lines matching pattern '${explainPattern(this.delim, this.pattern, 'pattern')}' with provided replacement lines`;
   }
 }
 
@@ -1181,9 +1284,13 @@ function documentSubstituteLinesRule(pattern, replace, delim) {
  * Similar to the line substitution rule, but the substituted text is "spread"
  * across all the lines that match.
  */
-function documentExecRule() {
-  return (lines, _, options) => {
-    const input = lines.map(([line]) => line).join('\n')
+class DocumentExecRule extends DocumentRule {
+  constructor() {
+    super('', '', '', [])
+  }
+
+  lines(documentLines, _, options) {
+    const input = documentLines.map(([line]) => line).join('\n')
 
     if (options.dryRun) {
       return input.split('\n')
@@ -1195,48 +1302,108 @@ function documentExecRule() {
 
     return []
   }
-}
 
-function documentSurroundRule(prependText, appendText) {
-  const prependLines = prependText == '' ? [] : prependText.split('\n')
-  const appendLines = appendText == '' ? [] : appendText.split('\n')
-  const prependLength = prependLines.length
-
-  return documentLines => {
-    return prependLines
-      .map((line, index) => line)
-      .concat(
-        documentLines.map(([line, lineNo]) => {
-          return line
-        }),
-      )
-      .concat(appendLines)
+  explain() {
+    return "Execute entire document as a shell script and replace with the command output";
   }
 }
 
-function documentJoinLinesRule(joiner) {
-  return documentLines =>
-    documentLines.map(([line]) => line).join(joiner || ' ')
+class DocumentSurroundRule extends DocumentRule {
+  prependLines
+  appendLines
+
+  constructor(prependText, appendText) {
+    super('', '', '', []);
+
+    this.prependLines = prependText === '' ? [] : prependText.split('\n');
+    this.appendLines = appendText === '' ? [] : appendText.split('\n');
+  }
+
+  lines(documentLines) {
+    const lines = documentLines.map(([line]) => line)
+    return [
+      ...this.prependLines,
+      ...lines,
+      ...this.appendLines,
+    ];
+  }
+
+  explain() {
+    let explanation = '';
+    if (this.prependLines.length) {
+      explanation += `Prepend document with '''\n${this.prependLines.join('\\n')}\n'''`;
+    }
+
+    if (this.prependLines.length && this.appendLines.length) {
+      explanation += ' and append '
+    } else if (this.appendLines.length) {
+      explanation += 'Append '
+    }
+
+    if (this.appendLines.length) {
+      explanation += `document with '''\n${this.appendLines.join('\\n')}\n'''`;
+    }
+
+    return explanation || 'No changes made to the document';
+  }
 }
 
-function documentLinesRule(lineRules) {
-  return (documentLines, _, options) => {
+class DocumentJoinLinesRule extends DocumentRule {
+  joiner
+
+  constructor(joiner) {
+    super('', '', '', []);
+    this.joiner = joiner || ' ';
+  }
+
+  lines(documentLines) {
+    return [documentLines.map(([line]) => line).join(this.joiner)];
+  }
+
+  explain() {
+    return `Join all lines into a single line using '${this.joiner}' as the separator`;
+  }
+}
+
+class DocumentCountRule extends DocumentRule {
+  constructor() {
+    super('', '', '', []);
+  }
+
+  lines(documentLines) {
+    return [[documentLines.length.toString()]];
+  }
+
+  explain() {
+    return "Count the number of lines in the document and replace the content with the count";
+  }
+}
+
+class DocumentLineRules extends DocumentRule {
+  lineRules
+
+  constructor(lineRules) {
+    super('', '', '', [])
+    this.lineRules = lineRules
+  }
+
+  lines(documentLines, _, options) {
     const state = resetState()
 
-    for (const lineRule of lineRules) {
+    for (const lineRule of this.lineRules) {
       lineRule.before?.(state)
     }
 
-    const inputLines = [...documentLines].map(([line]) => line)
+    const inputLines = documentLines.map(([line]) => line)
     const isLastLineBlank = inputLines.at(-1) === ''
     if (isLastLineBlank) {
       inputLines.pop()
     }
 
     const retLines = []
-    processLines(state, true, lineRules, options, retLines, inputLines)
+    processLines(state, true, this.lineRules, options, retLines, inputLines)
 
-    for (const lineRule of lineRules) {
+    for (const lineRule of this.lineRules) {
       lineRule.after?.(state)
     }
 
@@ -1246,39 +1413,39 @@ function documentLinesRule(lineRules) {
 
     return retLines
   }
-}
 
-function documentCountRule() {
-  return documentLines => [documentLines.length.toString()]
+  explain() {
+    return this.lineRules.map(rule => rule.explain()).join('\n')
+  }
 }
 
 function toDocumentRule([cmd, pattern, replace, rest, delim]) {
   switch (cmd) {
     case 'count':
-      return documentCountRule()
+      return new DocumentCountRule()
     case '!sort':
     case 'sort':
-      return documentSortRule(pattern, replace, !cmd.startsWith('!'))
+      return new DocumentSortRule(pattern, replace, !cmd.startsWith('!'))
     case '!sortn':
     case 'sortn':
-      return documentSortNumericRule(pattern, replace, !cmd.startsWith('!'))
+      return new DocumentSortNumericRule(pattern, replace, !cmd.startsWith('!'))
     case 'reverse':
-      return documentReverseRule()
+      return new DocumentReverseRule()
     case 'begin':
     case 'border':
-      return documentSurroundRule(pattern ?? '', replace ?? '')
+      return new DocumentSurroundRule(pattern ?? '', replace ?? '')
     case 'end':
-      return documentSurroundRule('', pattern)
+      return new DocumentSurroundRule('', pattern)
     case 'line':
     case 'lines':
-      return documentLineNumbersRule(pattern, replace)
+      return new DocumentLineNumbersRule(pattern, replace)
     case 'join':
-      return documentJoinLinesRule(pattern)
+      return new DocumentJoinLinesRule(pattern)
     case 'sl':
     case 'sublines':
-      return documentSubstituteLinesRule(pattern, replace, delim)
+      return new DocumentSubstituteLinesRule(delim, pattern, replace)
     case 'exec':
-      return documentExecRule()
+      return new DocumentExecRule()
     case 'help':
       help()
       process.exit(0)
@@ -1717,7 +1884,7 @@ function main(args, options = {}) {
       lineRules.push(lineRule)
     } else if ((documentRule = toDocumentRule(parsed))) {
       if (lineRules.length) {
-        documentRules.push(documentLinesRule(lineRules))
+        documentRules.push(new DocumentLineRules(lineRules))
         lineRules = []
       }
 
@@ -1728,7 +1895,7 @@ function main(args, options = {}) {
   }
 
   if (lineRules.length && documentRules.length) {
-    documentRules.push(documentLinesRule(lineRules))
+    documentRules.push(new DocumentLineRules(lineRules))
     lineRules = []
   }
 
@@ -1803,11 +1970,12 @@ function main(args, options = {}) {
       }
 
       for (const documentRule of documentRules) {
+        const state = resetState()
+        documentRule.before(state, options)
+
         const linesWithNumbers = lines.map((line, index) => [line, index + 1])
-        lines = documentRule(linesWithNumbers, state, options)
-        if (!lines?.length) {
-          break
-        }
+        lines = documentRule.run(linesWithNumbers, state, options)
+        documentRule.after(state, options)
       }
 
       const finalLines = lines ?? []
