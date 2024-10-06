@@ -17,7 +17,7 @@ function requireArg(name, value) {
   }
 }
 
-class LineRule {
+class Rule {
   delim = ''
   pattern = ''
   replace
@@ -33,15 +33,23 @@ class LineRule {
   /**
    * Run before any lines are processed
    */
-  before(state) {}
+  before(state, options) {}
+
+  /**
+   * Run after all lines have processed.
+   */
+  after(state, options) {}
+}
+
+class LineRule extends Rule {
   /**
    * Run before every line
    */
-  beforeEach(line, state) {}
+  beforeEach(line, state, options) {}
   /**
    * Runs on every line, even if previous rules returned null/undefined
    */
-  run(line, lineNo, _state) {
+  run(line, lineNo, state, options) {
     if (line != null) {
       return this.line(line, lineNo)
     }
@@ -49,15 +57,11 @@ class LineRule {
   /**
    * Should only run on lines that have text, even if the text is ''
    */
-  line(line, _lineNo) {}
+  line(line, lineNo) {}
   /**
    * Run after every line (or lines, if a rule returns multiple lines)
    */
-  afterEach(line, state) {}
-  /**
-   * Run after all lines have processed.
-   */
-  after(state) {}
+  afterEach(line, state, options) {}
 
   explain() {
     return ''
@@ -66,12 +70,17 @@ class LineRule {
 
 /**
  * Performs a single substitution on every line that matches. Use gsub to replace
- * multiple substitutions perline.
+ * multiple substitutions per-line.
  *
- * When matching line numbers, the entire line is replaced with the matching text.
+ * When matching line numbers (':' delimiter), the entire line is replaced with the
+ * matching text.
+ *
+ * The '`' delimiter can be used to match literal strings, all other delimiters
+ * match using Regex.
  *
  * Usage:
  *     ssed sub/{pattern}/{replace}
+ *     ssed sub`{search}`{replace}
  *     ssed sub:{line-number}:replace-lines
  *
  * Aliases:
@@ -88,11 +97,11 @@ class LineRule {
  *                          text
  */
 class SubstitutionRule extends LineRule {
-  constructor(delim, pattern, replace, args) {
+  constructor(delim, pattern, replace) {
     replace ??= ''
     requireArg('pattern', pattern)
 
-    super(delim, pattern, replace, args)
+    super(delim, pattern, replace, [])
 
     if (delim === ':') {
       const lineRangeTest = toLineRangeTest(pattern)
@@ -102,6 +111,8 @@ class SubstitutionRule extends LineRule {
         }
         return line
       }
+    } else if (delim === '`') {
+      this.line = line => line.replace(pattern, replace)
     } else {
       const regex = new RegExp(pattern)
       this.line = line => line.replace(regex, replace)
@@ -120,10 +131,14 @@ class SubstitutionRule extends LineRule {
 /**
  * Replaces every match with the substitution.
  *
+ * The '`' delimiter can be used to match literal strings, all other delimiters
+ * match using Regex.
+ *
  * Does not support line numbers.
  *
  * Usage:
  *     ssed gsub/{pattern}
+ *     ssed gsub`{search}
  *
  * Aliases:
  *     ssed g/{pattern}
@@ -135,15 +150,19 @@ class SubstitutionRule extends LineRule {
 class GlobalSubstitutionRule extends LineRule {
   constructor(delim, pattern, replace) {
     if (delim === ':') {
-      throw `'gsub' does not support line numbers (use 'sub')`
+      throw Error(`'gsub' does not support line numbers (use 'sub')`)
     }
 
     replace ??= ''
     requireArg('pattern', pattern)
     super(delim, pattern, replace ?? '', [])
 
-    const regex = new RegExp(pattern, 'g')
-    this.line = line => line.replace(regex, replace)
+    if (delim === '`') {
+      this.line = line => line.replace(pattern, replace)
+    } else {
+      const regex = new RegExp(pattern, 'g')
+      this.line = line => line.replace(regex, replace)
+    }
   }
 
   explain() {
@@ -159,10 +178,14 @@ class GlobalSubstitutionRule extends LineRule {
  * Only print the matching part of the line, or print the entire line if 'pattern'
  * doesn't match. (hint: Use `takeprint / tp` to only print matching lines)
  *
+ * The '`' delimiter can be used to match literal strings, all other delimiters
+ * match using Regex.
+ *
  * Does not support line numbers.
  *
  * Usage:
  *     ssed take/{pattern}
+ *     ssed take`{search}
  *
  * Aliases:
  *     ssed t/{pattern}
@@ -175,15 +198,25 @@ class GlobalSubstitutionRule extends LineRule {
 class TakeRule extends LineRule {
   constructor(delim, pattern) {
     if (delim === ':') {
-      throw `'take' does not support line numbers`
+      throw Error(`'take' does not support line numbers`)
     }
 
     super(delim, pattern, '', [])
 
-    const regex = new RegExp(pattern)
-    this.line = line => {
-      const match = line.match(regex)
-      return match ? match[0] : line
+    if (delim === '`') {
+      this.line = line => {
+        if (line.includes(pattern)) {
+          return pattern
+        }
+
+        return line
+      }
+    } else {
+      const regex = new RegExp(pattern)
+      this.line = line => {
+        const match = line.match(regex)
+        return match ? match[0] : line
+      }
     }
   }
 
@@ -200,8 +233,12 @@ class TakeRule extends LineRule {
  * Removes the matching part of the line, or print the entire line if 'pattern'
  * doesn't match.
  *
+ * The '`' delimiter can be used to match literal strings, all other delimiters
+ * match using Regex.
+ *
  * Usage:
  *     ssed rm/{pattern}
+ *     ssed rm`{pattern}
  *
  * Aliases:
  *     ssed r/{pattern}
@@ -212,13 +249,17 @@ class TakeRule extends LineRule {
 class RemoveRule extends LineRule {
   constructor(delim, pattern) {
     if (delim === ':') {
-      throw `'rm' does not support line numbers`
+      throw Error(`'rm' does not support line numbers`)
     }
 
     super(delim, pattern, '', [])
 
-    const regex = new RegExp(pattern)
-    this.line = line => line.replace(regex, '')
+    if (delim === '`') {
+      this.line = line => line.replace(pattern, '')
+    } else {
+      const regex = new RegExp(pattern)
+      this.line = line => line.replace(regex, '')
+    }
   }
 
   explain() {
@@ -242,6 +283,7 @@ class RemoveRule extends LineRule {
  *
  * Aliases:
  *     ssed p/{pattern}
+ *     ssed p`{search}
  *
  * @example Using regex
  *     this
@@ -256,12 +298,16 @@ class RemoveRule extends LineRule {
  *                         text
  */
 class PrintRule extends LineRule {
+  check
+
   constructor(delim, pattern) {
     pattern ??= ''
     super(delim, pattern, '', [])
 
     if (delim === ':') {
       this.check = toLineRangeTest(pattern)
+    } else if (delim === '`') {
+      this.check = line => line.includes(pattern)
     } else {
       const regex = new RegExp(pattern)
       this.check = line => line.match(regex)
@@ -305,11 +351,15 @@ class PrintRule extends LineRule {
  *                      text
  */
 class KillRule extends LineRule {
-  constructor(delim, pattern, replace, args) {
-    super(delim, pattern, replace, args)
+  check
+
+  constructor(delim, pattern, replace) {
+    super(delim, pattern, replace, [])
 
     if (delim === ':') {
       this.check = toLineRangeTest(pattern)
+    } else if (delim === '`') {
+      this.check = line => line.includes(pattern)
     } else {
       const regex = new RegExp(pattern)
       this.check = line => line.match(regex)
@@ -359,11 +409,17 @@ class KillRule extends LineRule {
  *                                           do you know bob?
  */
 class UniqueRule extends LineRule {
-  constructor(delim, pattern, replace, args) {
-    super(delim, pattern, replace, args)
+  part
+
+  constructor(delim, pattern, replace) {
+    super(delim, pattern, replace, [])
 
     if (delim === ':') {
       throw Error(`'uniq' does not support line numbers`)
+    }
+
+    if (delim === '`') {
+      throw Error(`'uniq' does not support literal matches`)
     }
 
     if (pattern) {
@@ -426,10 +482,12 @@ class UniqueRule extends LineRule {
  *                                      |   line 3|
  */
 class TrimRule extends LineRule {
-  constructor(delim, pattern, replace, args) {
-    super(delim, pattern, replace, args)
+  trim
+
+  constructor(delim, pattern, replace) {
+    super(delim, pattern, replace, [])
     if (delim === ':') {
-      throw `'trim' does not support line numbers`
+      throw Error(`'trim' does not support line numbers`)
     }
 
     // Set the appropriate trim function based on the pattern
@@ -477,8 +535,11 @@ class TrimRule extends LineRule {
  *                             ->4<-
  */
 class SurroundRule extends LineRule {
-  constructor(delim, prepend, append, args) {
-    super(delim, '', '', args) // pattern and replace are not used in this rule
+  prepend
+  append
+
+  constructor(delim, prepend, append) {
+    super(delim, '', '', []) // pattern and replace are not used in this rule
     this.prepend = prepend
     this.append = append
   }
@@ -511,8 +572,8 @@ class SurroundRule extends LineRule {
  *                            line 4
  */
 class PrependRule extends SurroundRule {
-  constructor(delim, prependText, args) {
-    super(delim, prependText, '', args)
+  constructor(delim, prependText) {
+    super(delim, prependText, '')
   }
 
   explain() {
@@ -539,8 +600,8 @@ class PrependRule extends SurroundRule {
  *                          4 foo
  */
 class AppendRule extends SurroundRule {
-  constructor(delim, appendText, args) {
-    super(delim, '', appendText, args)
+  constructor(delim, appendText) {
+    super(delim, '', appendText)
   }
 
   explain() {
@@ -564,13 +625,18 @@ class AppendRule extends SurroundRule {
  *                            ->4<-
  */
 class InsertRule extends LineRule {
-  constructor(delim, pattern, text, args) {
+  check
+
+  constructor(delim, pattern, text) {
     requireArg('pattern', pattern)
     requireArg('text', text)
 
-    super(delim, pattern, text, args)
+    super(delim, pattern, text, [])
+
     if (delim === ':') {
       this.check = toLineRangeTest(pattern)
+    } else if (delim === '`') {
+      this.check = line => line.includes(pattern)
     } else {
       const regex = new RegExp(pattern)
       this.check = line => line.match(regex)
@@ -585,9 +651,11 @@ class InsertRule extends LineRule {
   }
 
   explain() {
-    return `After ${explainPattern(this.delim, this.pattern)} insert '${
-      this.replace
-    }'`
+    return `After ${explainPattern(
+      this.delim,
+      this.pattern,
+      'pattern',
+    )} insert '${this.replace}'`
   }
 }
 
@@ -618,17 +686,22 @@ class InsertRule extends LineRule {
  *                               g   # off until 'f', then turned on starting at next line
  */
 class ControlPrintingRule extends LineRule {
-  constructor(cmd, delim, pattern, args) {
+  cmd
+  check
+
+  constructor(cmd, delim, pattern) {
     requireArg('pattern', pattern)
 
-    super(delim, pattern, '', args)
+    super(delim, pattern, '', [])
 
     this.cmd = cmd
     if (delim === ':') {
-      this.check = this.toLineRangeTest(pattern)
+      this.check = toLineRangeTest(pattern)
+    } else if (delim === '`') {
+      this.check = line => line.includes(pattern)
     } else {
       const regex = new RegExp(pattern)
-      this.check = line => !!line.match(regex)
+      this.check = line => line.match(regex)
     }
   }
 
@@ -658,7 +731,11 @@ class ControlPrintingRule extends LineRule {
       (state.printOn || this.check(line, lineNo))
     ) {
       state.printOn = true
-    } else if (this.cmd === 'off' && state.printOn && this.check(line, lineNo)) {
+    } else if (
+      this.cmd === 'off' &&
+      state.printOn &&
+      this.check(line, lineNo)
+    ) {
       state.printOn = false
     } else if (this.cmd === 'toggle' && this.check(line, lineNo)) {
       state.printOn = !state.printOn
@@ -728,12 +805,18 @@ class ControlPrintingRule extends LineRule {
  *     this is text | 2/(\w+) (\w+) (\w+) => is
  */
 class GroupMatchRule extends LineRule {
+  index
+
   constructor(index, delim, pattern) {
     super(delim, pattern, '', [])
     this.index = index
 
     if (delim === ':') {
-      throw `'${index}' does not support line numbers`
+      throw Error(`'${index}' does not support line numbers`)
+    }
+
+    if (delim === '`') {
+      throw Error(`'${index}' does not support literal matches`)
     }
 
     if (!pattern) {
@@ -782,6 +865,9 @@ class GroupMatchRule extends LineRule {
  *     1:bb:3:4:Z | cols/:/1,3,2 => 1 3 bb
  */
 class ColumnsRule extends LineRule {
+  columns
+  joiner
+
   constructor(delim, pattern, columns, args) {
     pattern ??= ''
     super(delim, pattern, '', [])
@@ -793,11 +879,20 @@ class ColumnsRule extends LineRule {
     }
 
     this.columns = columns.split(',').map(Number)
-    const regex = pattern === '' ? /\s+/ : new RegExp(pattern)
+
+    let splitter
+    if (pattern && delim === '`') {
+      splitter = pattern
+    } else if (pattern) {
+      splitter = new RegExp(pattern === '' ? /\s+/ : pattern)
+    } else {
+      splitter = /\s+/
+    }
+
     this.joiner = args[0] ?? ' '
 
     this.line = line => {
-      const parts = line.split(regex)
+      const parts = line.split(splitter)
       return this.columns.map(index => parts[index - 1] ?? '').join(this.joiner)
     }
   }
@@ -826,40 +921,39 @@ class ColumnsRule extends LineRule {
   }
 }
 
-class CombineRule extends LineRule {
-  constructor(rule1, rule2) {
-    super('', '', '', []) // Delim, pattern, replace, and args are not directly used in CombineRule
-    this.rule1 = rule1
-    this.rule2 = rule2
+class CombineRules extends LineRule {
+  rules
+
+  constructor(...rules) {
+    super('', '', '', []) // Delim, pattern, replace, and args are not directly used in CombineRules
+    this.rules = rules
   }
 
   before(state) {
-    this.rule1.before(state)
-    this.rule2.before(state)
+    this.rules.forEach(rule => rule.before(state))
   }
 
   beforeEach(line, state) {
-    this.rule1.beforeEach(line, state)
-    this.rule2.beforeEach(line, state)
+    this.rules.forEach(rule => rule.beforeEach(line, state))
   }
 
   run(line, lineNo, state) {
-    const result = this.rule1.run(line, lineNo, state)
-    return this.rule2.run(result, lineNo, state)
+    return this.rules.reduce(
+      (line, rule) => rule.run(line, lineNo, state),
+      line,
+    )
   }
 
   afterEach(line, state) {
-    this.rule1.afterEach(line, state)
-    this.rule2.afterEach(line, state)
+    this.rules.forEach(rule => rule.afterEach(line, state))
   }
 
   after(state) {
-    this.rule1.after(state)
-    this.rule2.after(state)
+    this.rules.forEach(rule => rule.after(state))
   }
 
   explain() {
-    return `${this.rule1.explain()}\n${this.rule2.explain()}`
+    return this.rules.map(rule => rule.explain()).join('\n')
   }
 }
 
@@ -891,7 +985,7 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
     case 'tp': {
       const take = new TakeRule(delim, pattern)
       const print = new PrintRule(delim, pattern)
-      rule = new CombineRule(take, print)
+      rule = new CombineRules(take, print)
       break
     }
     case 'rmprint':
@@ -899,7 +993,7 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
     case 'rp': {
       const remove = removeRule(delim, pattern)
       const print = printRule(delim, pattern)
-      rule = new CombineRule(remove, print)
+      rule = new CombineRules(remove, print)
       break
     }
     case 'kill':
@@ -917,14 +1011,14 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
       break
     case 'prepend':
     case 'prefix':
-      rule = new PrependRule(pattern)
+      rule = new PrependRule(delim, pattern)
       break
     case 'append':
     case 'suffix':
-      rule = new AppendRule(pattern)
+      rule = new AppendRule(delim, pattern)
       break
     case 'surround':
-      rule = new SurroundRule(pattern, replace)
+      rule = new SurroundRule(delim, pattern, replace)
       break
     case 'insert':
       rule = new InsertRule(delim, pattern, replace)
@@ -1040,6 +1134,8 @@ function documentSubstituteLinesRule(pattern, replace, delim) {
 
   if (delim === ':') {
     check = toLineRangeTest(pattern)
+  } else if (delim === '`') {
+    check = line => line.includes(pattern)
   } else {
     const regex = new RegExp(pattern)
     check = line => line.match(regex)
@@ -1066,13 +1162,13 @@ function documentSubstituteLinesRule(pattern, replace, delim) {
         matchedLineNumbers.shift()
         if (matchedLineNumbers.length === 0) {
           return replaceLines
+        }
+
+        const nextLine = replaceLines.shift()
+        if (nextLine == null) {
+          return []
         } else {
-          const nextLine = replaceLines.shift()
-          if (nextLine == null) {
-            return []
-          } else {
-            return [nextLine]
-          }
+          return [nextLine]
         }
       }
 
@@ -1171,7 +1267,7 @@ function toDocumentRule([cmd, pattern, replace, rest, delim]) {
     case 'begin':
     case 'border':
       return documentSurroundRule(pattern ?? '', replace ?? '')
-    case 'after':
+    case 'end':
       return documentSurroundRule('', pattern)
     case 'line':
     case 'lines':
@@ -1207,9 +1303,21 @@ function escapeRegex(pattern) {
   return pattern.replaceAll('/', '\\/')
 }
 
+function escapeLiteral(pattern) {
+  return pattern.replaceAll("'", "\\'")
+}
+
 function explainPattern(delim, pattern, text) {
   if (delim === ':') {
     return _toLineRangeTest(pattern, 'explain')
+  }
+
+  if (delim === '`') {
+    if (text === 'pattern') {
+      return `'${escapeLiteral(pattern)}'`
+    } else if (text === 'matching-lines') {
+      return `lines that match '${escapeLiteral(pattern)}'`
+    }
   }
 
   if (text === 'pattern') {
@@ -1226,8 +1334,22 @@ function toLineRangeTest(pattern) {
 }
 
 function _toLineRangeTest(pattern, job) {
-  if (!pattern.match(/^[\d*%,-]*$/)) {
-    throw Error('Invalid line range pattern')
+  const matchModulo = /%\s*\d+\s*(-\s*\d+)?/
+  const matchRange = /\d+\s*-\s*\d+|-\s*\d+|\d+\s*-|\d+/
+  const valid = new RegExp(
+    `^\*|(${matchModulo.source}|${matchRange.source})(\s*,\s*((${matchModulo.source}|${matchRange.source})))*$`,
+  )
+  if (!pattern.match(/^(\*|)$/)) {
+    const allowed = [
+      '',
+      '* (all lines)',
+      '$start-$stop (line range)',
+      '$start-, -$stop (starting at line, ending at line)',
+      '%$frequency (every Nth line)',
+      '%$frequency-$offset (every Nth line minus offset)',
+      '$range1, $range2 [, $range3] (multiple ranges)',
+    ]
+    throw Error('Invalid line range pattern, expected:' + allowed.join('\n - '))
   }
 
   if (!pattern || pattern === '*') {
@@ -1265,10 +1387,6 @@ function _toLineRangeTest(pattern, job) {
     }
   }
 
-  if (pattern.includes('+')) {
-    throw Error('Invalid line range symbol `+`')
-  }
-
   if (pattern.includes('-')) {
     const [start, stop] = pattern.split('-', 2).map((number, index) => {
       if (number === '' && index === 0) {
@@ -1281,10 +1399,10 @@ function _toLineRangeTest(pattern, job) {
     })
 
     if (job === 'explain') {
-      return start === 0 && stop === Infinity
+      return start === 1 && stop === Infinity
         ? 'all lines'
-        : start === 0
-        ? `lines up to ${stop}`
+        : start === 1
+        ? `all lines up to ${stop}`
         : stop === Infinity
         ? `lines from ${start} to end`
         : `lines from ${start} to ${stop}`
@@ -1412,9 +1530,9 @@ function parseOption(options, arg, args) {
       }
     }
     case 'no-input':
-      return {inputFromFile: false, input: process.stdin}
+      return {inputFrom: 'stdin', input: process.stdin}
     case 'ls':
-      return {inputFromFile: true, input: null}
+      return {inputFrom: 'ls', input: null}
     case 'input': {
       let file
       if (arg.match(/^--input=/)) {
@@ -1423,30 +1541,34 @@ function parseOption(options, arg, args) {
         file = args.shift()
       }
 
-      const files = file.split(',')
-      const prevFiles = Array.isArray(options.input) ? options.input : []
-      if (files.length > 1) {
-        return {
-          inputFromFile: true,
-          input: [
-            ...prevFiles,
-            files.map(file => {
-              if (fs.existsSync(file)) {
-                return file
-              } else {
-                throw Error(`File does not exist: ${file}`)
-              }
-            }),
-          ],
-        }
-      } else {
+      const fileNames = file.split(',')
+      const prevFiles =
+        options.inputFrom === 'files'
+          ? options.input
+          : options.inputFrom === 'file'
+          ? [options.input]
+          : []
+      const files = [...prevFiles, ...fileNames].map(file => {
         if (fs.existsSync(file)) {
-          return {
-            inputFromFile: true,
-            input: prevFiles.length ? [...prevFiles, file] : file,
-          }
+          return file
         } else {
           throw Error(`File does not exist: ${file}`)
+        }
+      })
+      if (files.length === 0) {
+        return {
+          inputFrom: 'stdin',
+          input: null,
+        }
+      } else if (files.length === 1) {
+        return {
+          inputFrom: 'file',
+          input: files[0],
+        }
+      } else {
+        return {
+          inputFrom: 'files',
+          input: files,
         }
       }
       break
@@ -1478,14 +1600,16 @@ function processLines(
       }
 
       mappedLines = mappedLines.flatMap(line => {
-        const nextLines = lineRule.run(line, state.lineNumber, state)
+        let nextLines = lineRule.run(line, state.lineNumber, state)
         if (nextLines == null) {
           return []
-        } else if (Array.isArray(nextLines)) {
-          return nextLines
-        } else {
-          return [nextLines]
         }
+
+        if (Array.isArray(nextLines)) {
+          return nextLines.flatMap(line => line.split('\n'))
+        }
+
+        return nextLines.split('\n')
       })
     }
 
@@ -1507,9 +1631,8 @@ function processLines(
 
 function main(args, options = {}) {
   options = {
-    ...options,
     input: process.stdin,
-    inputFromFile: false,
+    inputFrom: 'stdin',
     interactive: false,
     write: false,
     writeToFile: null,
@@ -1523,6 +1646,7 @@ function main(args, options = {}) {
     error: (line, nl = true) => {
       process.stderr.write(line + (nl ? '\n' : ''))
     },
+    ...options,
   }
 
   let lineRules = []
@@ -1540,38 +1664,37 @@ function main(args, options = {}) {
     }
   }
 
-  // array / null input
-  // array => list of files (ssed --input=file1,file2)
-  // null => read files from stdin (ssed --input - )
-  if (options.inputFromFile && typeof options.input !== 'string') {
+  // inputFrom: 'stdin' => parse stdin only (`<file ssed`)
+  // inputFrom: 'file' => input: list of files (`ssed --input=file1,file2`)
+  // inputFrom: 'ls' => read filenames from stdin (`ssed --input` - or `ssed --ls`)
+  if (options.inputFrom === 'ls' || options.inputFrom === 'files') {
     function next(file) {
-      main([], {
+      main(rules, {
         ...options,
+        inputFrom: 'file',
         input: file,
+      }).on('open', () => {
+        if (!options.diff) {
+          options.print(yellow(`ssed: ${file}`))
+        }
       })
-        .on('open', () => {
-          if (!options.diff) {
-            options.print(yellow(`ssed: ${file}`))
-          }
-        })
-        .on('close', next)
     }
 
-    if (options.input === null) {
+    if (options.inputFrom === 'ls') {
       const stdin = lineStream(process.stdin)
       // treat stdin as list of files
 
       stdin.on('line', file => {
         next(file)
       })
-    } else if (Array.isArray(options.input)) {
+    } else {
       options.input.forEach(next)
     }
 
     return
   }
 
-  if (options.inputFromFile) {
+  if (options.inputFrom === 'file') {
     options.diffHeader = `diff ${options.input}
 --- ${options.input}
 +++ ssed ${args.map(escapeShell).join(' ')}`
@@ -1731,7 +1854,7 @@ function main(args, options = {}) {
                 inputLineNumber += entry.lines.length - printLines.length
                 outputLineNumber += entry.lines.length - printLines.length
                 printLineNumbers(inputLineNumber, outputLineNumber)
-                printLines.forEach(line => options.print(line))
+                printLines.forEach(line => options.print(' ' + line))
                 inputLineNumber += printLines.length
                 outputLineNumber += printLines.length
               } else if (index === linesDiff.length - 1) {
@@ -1739,11 +1862,11 @@ function main(args, options = {}) {
                 printLineNumbers(inputLineNumber, outputLineNumber)
                 inputLineNumber += entry.lines.length - printLines.length
                 outputLineNumber += entry.lines.length - printLines.length
-                printLines.forEach(line => options.print(line))
+                printLines.forEach(line => options.print(' ' + line))
                 inputLineNumber += printLines.length
                 outputLineNumber += printLines.length
               } else if (entry.lines.length <= 5) {
-                entry.lines.forEach(line => options.print(line))
+                entry.lines.forEach(line => options.print(' ' + line))
                 inputLineNumber += entry.lines.length
                 outputLineNumber += entry.lines.length
               } else {
@@ -1753,11 +1876,11 @@ function main(args, options = {}) {
                 const afterLines = entry.lines.slice(
                   Math.max(entry.lines.length - 3, 0),
                 )
-                beforeLines.forEach(line => options.print(line))
+                beforeLines.forEach(line => options.print(' ' + line))
                 inputLineNumber += entry.lines.length - afterLines.length
                 outputLineNumber += entry.lines.length - afterLines.length
                 printLineNumbers(inputLineNumber, outputLineNumber)
-                afterLines.forEach(line => options.print(line))
+                afterLines.forEach(line => options.print(' ' + line))
               }
 
               return
@@ -1885,6 +2008,10 @@ function split(str, delim) {
     } else {
       buffer += char
     }
+  }
+
+  if (isEscaped) {
+    buffer += '\\'
   }
 
   if (buffer.length) {
@@ -2193,6 +2320,12 @@ function diff(oldLines, newLines) {
 if (!Array.prototype.toSorted) {
   Array.prototype.toSorted = function (compareFn) {
     return [...this].sort(compareFn)
+  }
+}
+
+if (!Array.prototype.toReversed) {
+  Array.prototype.toReversed = function () {
+    return [...this].reverse()
   }
 }
 
