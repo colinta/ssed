@@ -36,6 +36,14 @@ class Rule {
   before(state, options) {}
 
   /**
+   * If the last line is blank, this function will be called. Default behaviour
+   * returns '', but rules can override this behaviour.
+   */
+  blankLastLine() {
+    return ''
+  }
+
+  /**
    * Run after all lines have processed.
    */
   after(state, options) {}
@@ -62,6 +70,7 @@ class LineRule extends Rule {
    * Should only run on lines that have text, even if the text is ''
    */
   line(line, lineNo) {}
+
   /**
    * Run after every line (or lines, if a rule returns multiple lines)
    */
@@ -174,7 +183,7 @@ class GlobalSubstitutionRule extends LineRule {
     super(delim, pattern, replace ?? '', [])
 
     if (delim === '`') {
-      this.line = line => line.replace(pattern, replace)
+      this.line = line => line.replaceAll(pattern, replace)
     } else {
       const regex = new RegExp(pattern, 'g')
       this.line = line => line.replace(regex, replace)
@@ -750,10 +759,15 @@ class ControlPrintingRule extends LineRule {
     } else if (
       this.cmd === 'off' &&
       state.printOn &&
+      line != null &&
       this.check(line, lineNo)
     ) {
       state.printOn = false
-    } else if (this.cmd === 'toggle' && this.check(line, lineNo)) {
+    } else if (
+      this.cmd === 'toggle' &&
+      line != null &&
+      this.check(line, lineNo)
+    ) {
       state.printOn = !state.printOn
     }
 
@@ -771,7 +785,11 @@ class ControlPrintingRule extends LineRule {
       this.check(state.suppressedLine, lineNo)
     ) {
       state.printOn = true
-    } else if (this.cmd === 'after' && this.check(line, lineNo)) {
+    } else if (
+      this.cmd === 'after' &&
+      line != null &&
+      this.check(line, lineNo)
+    ) {
       state.printOn = true
     }
   }
@@ -892,6 +910,10 @@ class ColumnsRule extends LineRule {
 
     if (delim === ':') {
       throw new Error(`'cols' does not support line numbers`)
+    }
+
+    if (!columns.match(/^\d+(,\d+)*$/)) {
+      throw new Error(`Invalid columns '${columns}', expected a comma-separated list of numbers`)
     }
 
     this.columns = columns.split(',').map(Number)
@@ -1319,6 +1341,10 @@ class DocumentSurroundRule extends DocumentRule {
     this.appendLines = appendText === '' ? [] : appendText.split('\n');
   }
 
+  blankLastLine() {
+    return null
+  }
+
   lines(documentLines) {
     const lines = documentLines.map(([line]) => line)
     return [
@@ -1356,6 +1382,10 @@ class DocumentJoinLinesRule extends DocumentRule {
     this.joiner = joiner || ' ';
   }
 
+  blankLastLine() {
+    return null
+  }
+
   lines(documentLines) {
     return [documentLines.map(([line]) => line).join(this.joiner)];
   }
@@ -1368,6 +1398,10 @@ class DocumentJoinLinesRule extends DocumentRule {
 class DocumentCountRule extends DocumentRule {
   constructor() {
     super('', '', '', []);
+  }
+
+  blankLastLine() {
+    return null
   }
 
   lines(documentLines) {
@@ -1385,6 +1419,22 @@ class DocumentLineRules extends DocumentRule {
   constructor(lineRules) {
     super('', '', '', [])
     this.lineRules = lineRules
+  }
+
+  /**
+   * If the last line is blank, this function will be called. Default behaviour
+   * returns '', but rules can override this behaviour.
+   */
+  blankLastLine() {
+    let lastLine = ''
+    for (const lineRule of this.lineRules) {
+      lastLine = lineRule.blankLastLine()
+      if (lastLine == null) {
+        return null
+      }
+    }
+
+    return lastLine
   }
 
   lines(documentLines, _, options) {
@@ -1408,7 +1458,17 @@ class DocumentLineRules extends DocumentRule {
     }
 
     if (isLastLineBlank) {
-      retLines.push('')
+      let lastLine = ''
+      for (const lineRule of this.lineRules) {
+        lastLine = lineRule.blankLastLine()
+        if (lastLine == null) {
+          break
+        }
+      }
+
+      if (lastLine != null) {
+        retLines.push(lastLine)
+      }
     }
 
     return retLines
@@ -1504,9 +1564,9 @@ function _toLineRangeTest(pattern, job) {
   const matchModulo = /%\s*\d+\s*(-\s*\d+)?/
   const matchRange = /\d+\s*-\s*\d+|-\s*\d+|\d+\s*-|\d+/
   const valid = new RegExp(
-    `^\*|(${matchModulo.source}|${matchRange.source})(\s*,\s*((${matchModulo.source}|${matchRange.source})))*$`,
+    `^\\*|(${matchModulo.source}|${matchRange.source})(\s*,\s*(${matchModulo.source}|${matchRange.source}))*$`,
   )
-  if (!pattern.match(/^(\*|)$/)) {
+  if (!pattern.match(valid)) {
     const allowed = [
       '',
       '* (all lines)',
@@ -1688,12 +1748,32 @@ function parseOption(options, arg, args) {
     }
     case 'no-write':
     case 'write': {
-      const [, writeToFile] = arg.split('=', 2)
+      let writeToFile
+      if (arg.match(/^--\w+=/)) {
+        ;[, writeToFile] = arg.split('=', 2)
+      } else {
+        writeToFile = args.shift()
+      }
 
       return {
         write: option === 'write',
         diff: option === 'write',
         writeToFile,
+      }
+    }
+    case 'write-rename':{
+      let writeToFile
+      if (arg.match(/^--\w+=/)) {
+        ;[, writeToFile] = arg.split('=', 2)
+      } else {
+        writeToFile = args.shift()
+      }
+
+      return {
+        write: true,
+        diff: true,
+        writeToFile,
+        renameInput: true,
       }
     }
     case 'no-input':
@@ -1702,7 +1782,7 @@ function parseOption(options, arg, args) {
       return {inputFrom: 'ls', input: null}
     case 'input': {
       let file
-      if (arg.match(/^--input=/)) {
+      if (arg.match(/^--\w+=/)) {
         ;[, file] = arg.split('=', 2)
       } else {
         file = args.shift()
@@ -1803,6 +1883,7 @@ function main(args, options = {}) {
     interactive: false,
     write: false,
     writeToFile: null,
+    renameInput: false, // replace '%' of input
     diff: false,
     diffHeader: '',
     diffContext: 3, // number of lines to print before and after diffs
@@ -1869,7 +1950,7 @@ function main(args, options = {}) {
     const file = options.input
     if (options.write && !options.writeToFile && file !== process.stdin) {
       options.writeToFile = file
-    } else if (options.writeToFile) {
+    } else if (options.writeToFile && options.renameInput) {
       options.writeToFile = options.writeToFile.replace('%', file)
     }
 
@@ -1974,13 +2055,23 @@ function main(args, options = {}) {
         documentRule.before(state, options)
 
         const linesWithNumbers = lines.map((line, index) => [line, index + 1])
-        lines = documentRule.run(linesWithNumbers, state, options)
+        lines = documentRule.run(linesWithNumbers, state, options) ?? []
         documentRule.after(state, options)
       }
 
       const finalLines = lines ?? []
       if (isLastLineBlank) {
-        finalLines.push('')
+        let lastLine = ''
+        for (const documentRule of documentRules) {
+          lastLine = documentRule.blankLastLine()
+          if (lastLine == null) {
+            break
+          }
+        }
+
+        if (lastLine != null) {
+          finalLines.push('')
+        }
       }
 
       if (options.diff) {
