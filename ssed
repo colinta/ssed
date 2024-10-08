@@ -2311,23 +2311,25 @@ function parseRuleArgs(rule) {
 }
 
 function help() {
-  process.stderr.write(`Usage:
-  ssed [options] [rules]
+  process.stderr.write(`
+Usage:
+
+    ssed [option|rule]...
 
 About
 -----
-    ssed is an alternative to 'sed'. Not a drop-in replacement, but used for
-    similar tasks. I wanted more familiar and modern Regex support, and have
-    kept adding more functions as ssed became more and more my go-to text
-    manipulation tool.
+ssed is an alternative to 'sed'. Not a drop-in replacement, but used for
+similar tasks. I wanted more familiar and modern Regex support, and have
+kept adding more functions as ssed became more and more my go-to text
+manipulation tool.
 
-    Line rules transform on a line-by-line basis and, if only line rules are
-    employed, support STDIN streaming.
+Line rules transform on a line-by-line basis and, if only line rules are
+employed, support STDIN streaming.
 
-    Document rules transform the entire document. STDIN is read to completion
-    before document rules are executed.
+Document rules transform the entire document. STDIN is read to completion
+before document rules are executed.
 
-    If the last line is blank, it is ignored.
+Most line rules ignore a trailing blank line.
 
 Options
 -------
@@ -2339,15 +2341,17 @@ Options
 
   --ls                         Read file names from standard input (\`ls | ssed --ls\`)
 
-  --input=fromfile             Use 'fromfile' as input
-  aka --input fromfile
+  --input=fromfile             Use 'fromfile' as input.
+  --input fromfile
 
   --input=fromfile1,fromfile2  Run against multiple files.
-  aka --input fromfile1 --input fromfile2
+  --input fromfile1 --input fromfile2
+
+  --no-input                   Do not use any file as input.
 
   --write                      Write each changed file in place.
   --write=tofile               Provide a destination file name.
-  --write=%.backup             '\%' is replaced with the input file.
+  --write-rename=%.backup      Use the input filename in place of '%'
   --no-write                   Do not write each changed file in place.
 
   --interactive                Ask before writing the file
