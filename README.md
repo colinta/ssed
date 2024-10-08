@@ -1,16 +1,5 @@
-# `ssed`
-
-I was fed up with sed's obtuse regular expression syntax/support. Yeah, when
-_JavaScript_ has a more sensible implementation, you know you have troubles.
-
-15 minutes later I had `ssed`. I think the README took longer than the tool!
-
-## Installation
-
-    npm install -g ssed
-
-## Usage
-
+Usage
+-----
     > ssed --help
     > something | ssed [commands]
 
@@ -18,160 +7,131 @@ All commands use a "g/re/p"-like syntax:
 
     cmd/match[/replace]
 
-All rules are run on every line, the output of one is fed into the next. If any step filters the line, the rest of the rules are skipped and the next line is processed.
+About
+-----
+ssed is an alternative to 'sed'. Not a drop-in replacement, but used for
+similar tasks. I wanted more familiar and modern Regex support, and have
+kept adding more functions as ssed became more and more my go-to text
+manipulation tool.
 
-Most commands can alternatively work on _line numbers_ instead of a regex match
+Line rules transform on a line-by-line basis and, if only line rules are
+employed, support STDIN streaming.
 
-    cat file | ssed print:1-5,10+   #  prints lines 1-5, also line 10 until the end of the file
+Document rules transform the entire document. STDIN is read to completion
+before document rules are executed.
 
-###### Substitute
-    sub/pattern/replace
-    s/pattern/replace
+Options
+-------
+  --diff                       Only show differences
+  --no-diff                    Do not show differences
 
-Replaces the first match.
+  --color                      Enable ANSI colors (true if stdout is a TTY)
+  --no-color                   Disable ANSI colors
 
-    echo what a test | ssed sub/w/W
-    => What a test
-    echo what a test | ssed 's/(\w+)/$1$1'
-    => whatwhat a test
+  --ls                         Read file names from standard input (\`ls | ssed --ls\`)
 
-###### Global Substitute
-    gsub/pattern/replace
-    g/pattern/replace
+  --input=fromfile             Use 'fromfile' as input.
+  --input fromfile
 
-Replaces all occurences of the pattern.
+  --input=fromfile1,fromfile2  Run against multiple files.
+  --input fromfile1 --input fromfile2
 
-    echo what a test | ssed gsub/t/T
-    => whaT a TesT
-    echo what a test | ssed g/[a-su-z]/.
-    => ...t . t..t
+  --no-input                   Do not use any file as input.
 
-###### "Take"
-    take/pattern
-    t/pattern
+  --write                      Write each changed file in place.
+  --write=tofile               Provide a destination file name.
+  --write-rename=%.backup      Use the input filename in place of '%'
+  --no-write                   Do not write each changed file in place.
 
-Prints the matching regex (or the entire line if there is no match).
+  --interactive                Ask before writing the file
+  --no-interactive             Do not ask before writing the file
 
-    echo 'what a test' | ssed 'take/t\w+'
-    => test
-    echo -e "what
-    > a
-    > great test" | ssed '+/t\w+t'
-    => what
-    a
-    test
+  --dry-run (-n)               Show which files would be affected.
+  --no-dry-run                 Do not show which files would be affected.
 
-###### "Nth"
-    1/pattern
-    2/pattern
-    3/pattern
-    ...
+Line Rules
+----------
+Line rules operate on every line. Commands 'on', 'after' and 'off' share the
+on/off state.
 
-Prints the n-th group in the regex (or the entire line if there is no match).
+    s/search/replace (aka sub/…/…)   Replace the first instance of 'search' with 'replace'
+    g/search/replace (aka gsub/…/…)  Replace every instance of 'search' with 'replace'
+    t/pattern (aka take/…)           Only print the matching part of the line, or print the entire line if 'pattern' doesn't match
+    r/pattern (aka rm/…)             Remove the matching part of the line, or print the entire line if 'pattern' doesn't match
+    1/pattern                        Only print the first group of the match
+    1                                Only print the first "column" (columns are separated by whitespace)
+    cols/pattern/columns             Split the line by 'pattern' (default is /\\s+/) and print columns
+                                     - columns can be separated by commas
+                                     - columns are joined by ' '
+    cols/pattern/columns/joiner      - columns are joiner by $joiner
 
-    echo 'what a test' | ssed '1/(\w+) (\w+) (\w+)'
-    => what
-    echo 'what a test' | ssed '2/(\w+) (\w+) (\w+)'
-    => a
-    echo 'what a test' | ssed '3/(\w+) (\w+) (\w+)'
-    => test
+    on/pattern                       Start printing on the line where 'pattern' is matched
+    off/pattern                      Stop printing on the line where 'pattern' is matched
+    after/pattern                    Start printing on the line *after* 'pattern' is matched
+    toggle/pattern                   Turn printing off at the matching line, then off, then on...
 
-###### "Remove"
-    remove/pattern
-    rm/pattern
-    r/pattern
+    p/pattern (aka print/…)          Only print lines that match 'pattern'
+    k/pattern (aka kill/…)           Do not print lines that match 'pattern'
+    !p/pattern (aka !print/…)        Alias for k/kill because I can't remember one (k) and always remember the other (p)
 
-Removes the matching part of the regex (or the entire line if there is no match).
+    prepend/text (aka prefix/…)
+    append/text (aka suffix/…)       Adds text to the beginning (prepend) or end (append) of the line
+    surround/prefix/suffix
 
-    echo 'what a test' | ssed 'rm/t\w+'
-    => what a
-    echo -e "what
-    > a
-    > great test" | ssed 'rm/t\w+t'
-    => what
-    a
-    great
+    uniq (aka unique)                Only print unique lines
+    uniq/pattern                     Only print matching lines, and only unique matches (uniqueness is determined by the matching regex)
 
-###### On
-    on/pattern
-    o/pattern
+Document Rules
+--------------
+    sublines/{pattern}/{replace}  For every line that matches, insert one line from replace. Remaining lines will
+         (aka sl/…)               be inserted into the last matched line. Does not do regex replacement.
 
-Turns on printing starting at the matching line. Until then, no lines will be printed. This feature uses a simple global "printOn" boolean, so don't go nesting multiple `on` commands, they'll step all over each other.
+    sort  sort/{pattern}          Sort the lines alphabetically using localeCompare.
+                                  If a pattern is provided, the matching part of the line will be used, but the
+                                  entire line will be printed.
+    sortn   sortn/pattern         Sort the lines numerically. If no pattern is given, it matches the *first* number.
+    reverse                       Obvious
+    line                          Prepend each line with the line number
 
-    echo -e "what
-    > a
-    > great test" | ssed 'on/^a'
-    => a
-    great test
+    begin:{prepend}
+    border:{prepend}:{append}     Prepend, append, or surround the document (add header/footer)
+    end:{append}
+    join     join/{separator}     Join lines with a space (or optional separator)
 
-###### After
-    after/pattern
-    a/pattern
+Separators
+----------
+The separator can change the behaviour of the line rule. Rules that support
+pattern matches likely also support line and literal matches.
 
-Just like `on` but doesn't print the matching line, it starts printing on the following line.
+    /  Default separator, indicates Regex
+    :  Indicates a line-number rule
+    \`  Indicates a literal string match
+       All other delimiters indicate Regex
 
-###### Off
-    off/pattern
-    f/pattern
+    s/\\w+/bar
+    s\`foo\`bar/
+    s|\\w+|bar
+    s{\\w+}bar
 
-Turns _off_ printing, only useful following an `on` or `after` command.
+Line Number rules
+-----------------
+Using the special delimiter ':' you can apply most rules on line numbers instead
+of line content. In the case of the 'sub' command, the entire line will be
+replaced with the literal text.
 
-    echo -e "this
-    > is
-    > a
-    > really
-    > great
-    > test" | ssed 'on/^a' off/test
-    => a
-    really
-    great
+For example
+    s:1:replace  Replaces line 1 with the word "replace"
+    p:1          Only print line 1
 
-###### Print
-    print/pattern
-    p/pattern
+Not all rules support this feature, but typically any rule that _could_ support it, _does_
 
-Prints the line if the pattern matches, skips it otherwise. I'm pretty sure this is an actual `sed` command! But who knows, `sed` is a mess.
-
-    echo -e "you
-    > get
-    > it
-    > by
-    > now,
-    > right?" | ssed 'p/[a-m]'
-    => get
-    it
-    by
-    right?
-
-###### Kill
-    kill/pattern
-    k/pattern
-
-Skips matching lines, inverse of `print`.
-
-    echo -e "you
-    get
-    it
-    by
-    now,
-    right?" | ssed 'p/[a-m]'
-    => you
-    now,
-
-###### Delimiters
-
-Other delimiters are supported. Trailing delimiter is optional.
-
-    sub|match|replace
-    s/match/replace/
-
-Bracket delimiters “work”, but they don't have to actually _match_, e.g. these are all equivalent:
-
-    g{match}replace
-    g}match{replace
-    g}match}replace
-    g{match{replace
-
-###### As-is
-
-I offer this up as-is. I'm happy to discuss PRs and bug fixes, but feature requests (as in "Why doesn't it…" or "Can you implement…") might be summarily closed with not so much as a by-your-leave. If you want it, write it yourself, this is some scrappy, easy JavaScript. Who has time for lazy programmers in <?= date('Y') %>!?
+Line numbers can be expressed as a single number, a range, an open range, a
+modulo operation (with offset), and a comma-separated list of line rules.
+    p:1                 Only matches the line number (only matches line 1)
+    p:%2                Matches lines that are modulo-N (even lines)
+    p:%2-1              Matches lines that are modulo-N minus Y (odd lines)
+    p:1,3,5             Matches the listed line numbers (and only these)
+    p:1-5               Matches the range of number, inclusive (1,2,3,4,5)
+    p:9-                Matches the line number and all subsequent lines (lines 9 and onward)
+    p:-9                Matches lines up to and including the line number (lines 1-9)
+    p:1-5,10-15,20,30+  Line rules can be mixed and matched

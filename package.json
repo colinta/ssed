@@ -10,7 +10,9 @@
   "bin": {
     "ssed": "./ssed"
   },
-  "scripts": {},
+  "scripts": {
+    "prepublishOnly": "<ssed ssed 'after/help' 'off/END HELP' '1/(Usage:)/' --write=README.md"
+  },
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/colinta/ssed.git"
