@@ -239,7 +239,7 @@ class ConditionalRule extends Rule {
 }
 
 class IfConditionRule extends ConditionalRule {
-  constructor(delim, pattern) {
+  constructor(delim, pattern, flags) {
     super(delim, pattern, '', [])
 
     if (delim === ':') {
@@ -247,7 +247,7 @@ class IfConditionRule extends ConditionalRule {
     } else if (delim === '`') {
       this.check = line => line.includes(pattern)
     } else {
-      const regex = new RegExp(pattern)
+      const regex = new RegExp(pattern, flags)
       this.check = line => line.match(regex)
     }
   }
@@ -381,7 +381,7 @@ class ConditionalDocumentRule extends DocumentRule {
 function toCondRule([cmd, pattern, replace, rest, delim]) {
   switch (cmd) {
   case 'if':
-    return new IfConditionRule(delim, pattern)
+    return new IfConditionRule(delim, pattern, replace || '')
   }
 }
 
@@ -414,7 +414,7 @@ function toCondRule([cmd, pattern, replace, rest, delim]) {
  *                          text
  */
 class SubstitutionRule extends LineRule {
-  constructor(delim, pattern, replace) {
+  constructor(delim, pattern, replace, flags) {
     replace ??= ''
     requireArg('pattern', pattern)
 
@@ -429,9 +429,20 @@ class SubstitutionRule extends LineRule {
         return line
       }
     } else if (delim === '`') {
-      this.line = line => line.replace(pattern, replace)
+      if (flags && flags.includes('i')) {
+        this.line = line => {
+          const index = line.toLowerCase().indexOf(pattern.toLowerCase())
+          if (~index) {
+            return line.slice(0, index) + replace + line.slice(index + pattern.length)
+          }
+
+          return line
+        }
+      } else {
+        this.line = line => line.replace(pattern, replace)
+      }
     } else {
-      const regex = new RegExp(pattern)
+      const regex = new RegExp(pattern, flags)
       this.line = line => line.replace(regex, replace)
     }
   }
@@ -465,7 +476,7 @@ class SubstitutionRule extends LineRule {
  *     this is text | g|t|T => This is Text
  */
 class GlobalSubstitutionRule extends LineRule {
-  constructor(delim, pattern, replace) {
+  constructor(delim, pattern, replace, flags) {
     if (delim === ':') {
       throw new ArgError(`'gsub' does not support line numbers (use 'sub')`)
     }
@@ -475,9 +486,25 @@ class GlobalSubstitutionRule extends LineRule {
     super(delim, pattern, replace ?? '', [])
 
     if (delim === '`') {
-      this.line = line => line.replaceAll(pattern, replace)
+      if (flags && flags.includes('i')) {
+        this.line = line => {
+          let index = 0
+          const parts = []
+          while (~index) {
+            index = line.toLowerCase().indexOf(pattern.toLowerCase())
+            if (~index) {
+              parts.push(line.slice(0, index))
+              line = line.slice(index + pattern.length)
+            }
+          }
+
+          return parts.join(replace) + line
+        }
+      } else {
+        this.line = line => line.replaceAll(pattern, replace)
+      }
     } else {
-      const regex = new RegExp(pattern, 'g')
+      const regex = new RegExp(pattern, 'g' + flags)
       this.line = line => line.replace(regex, replace)
     }
   }
@@ -513,7 +540,7 @@ class GlobalSubstitutionRule extends LineRule {
  *     how now      | take/t\w+ => how now
  */
 class TakeRule extends LineRule {
-  constructor(delim, pattern) {
+  constructor(delim, pattern, flags) {
     if (delim === ':') {
       throw new ArgError(`'take' does not support line numbers`)
     }
@@ -529,7 +556,7 @@ class TakeRule extends LineRule {
         return line
       }
     } else {
-      const regex = new RegExp(pattern)
+      const regex = new RegExp(pattern, flags)
       this.line = line => {
         const match = line.match(regex)
         return match ? match[0] : line
@@ -564,7 +591,7 @@ class TakeRule extends LineRule {
  *     this is text | rm/^\w+ is/ => text
  */
 class RemoveRule extends LineRule {
-  constructor(delim, pattern) {
+  constructor(delim, pattern, flags) {
     if (delim === ':') {
       throw new ArgError(`'rm' does not support line numbers`)
     }
@@ -574,7 +601,7 @@ class RemoveRule extends LineRule {
     if (delim === '`') {
       this.line = line => line.replace(pattern, '')
     } else {
-      const regex = new RegExp(pattern)
+      const regex = new RegExp(pattern, flags)
       this.line = line => line.replace(regex, '')
     }
   }
@@ -617,7 +644,7 @@ class RemoveRule extends LineRule {
 class PrintRule extends LineRule {
   check
 
-  constructor(delim, pattern) {
+  constructor(delim, pattern, flags) {
     pattern ??= ''
     super(delim, pattern, '', [])
 
@@ -626,7 +653,7 @@ class PrintRule extends LineRule {
     } else if (delim === '`') {
       this.check = line => line.includes(pattern)
     } else {
-      const regex = new RegExp(pattern)
+      const regex = new RegExp(pattern, flags)
       this.check = line => line.match(regex)
     }
   }
@@ -670,7 +697,7 @@ class PrintRule extends LineRule {
 class KillRule extends LineRule {
   check
 
-  constructor(delim, pattern) {
+  constructor(delim, pattern, flags) {
     super(delim, pattern, '', [])
 
     if (delim === ':') {
@@ -678,7 +705,7 @@ class KillRule extends LineRule {
     } else if (delim === '`') {
       this.check = line => line.includes(pattern)
     } else {
-      const regex = new RegExp(pattern)
+      const regex = new RegExp(pattern, flags)
       this.check = line => line.match(regex)
     }
   }
@@ -728,7 +755,7 @@ class KillRule extends LineRule {
 class UniqueRule extends LineRule {
   part
 
-  constructor(delim, pattern) {
+  constructor(delim, pattern, flags) {
     super(delim, pattern, '', [])
 
     if (delim === ':') {
@@ -740,7 +767,7 @@ class UniqueRule extends LineRule {
     }
 
     if (pattern) {
-      const regex = new RegExp(pattern)
+      const regex = new RegExp(pattern, flags)
       this.part = line => {
         const match = line.match(regex)
         return match ? match[0] : null
@@ -944,7 +971,7 @@ class AppendRule extends SurroundRule {
 class InsertRule extends LineRule {
   check
 
-  constructor(delim, pattern, text) {
+  constructor(delim, pattern, text, flags) {
     requireArg('pattern', pattern)
     requireArg('text', text)
 
@@ -955,7 +982,7 @@ class InsertRule extends LineRule {
     } else if (delim === '`') {
       this.check = line => line.includes(pattern)
     } else {
-      const regex = new RegExp(pattern)
+      const regex = new RegExp(pattern, flags)
       this.check = line => line.match(regex)
     }
   }
@@ -1006,7 +1033,7 @@ class ControlPrintingRule extends LineRule {
   cmd
   check
 
-  constructor(cmd, delim, pattern) {
+  constructor(cmd, delim, pattern, flags) {
     super(delim, pattern, '', [])
 
     this.cmd = cmd
@@ -1017,7 +1044,7 @@ class ControlPrintingRule extends LineRule {
     } else if (delim === '`') {
       this.check = line => line.includes(pattern)
     } else {
-      const regex = new RegExp(pattern)
+      const regex = new RegExp(pattern, flags)
       this.check = line => line.match(regex)
     }
   }
@@ -1133,7 +1160,7 @@ class ControlPrintingRule extends LineRule {
 class GroupMatchRule extends LineRule {
   index
 
-  constructor(index, delim, pattern) {
+  constructor(index, delim, pattern, flags) {
     super(delim, pattern, '', [])
     this.index = index
 
@@ -1151,7 +1178,7 @@ class GroupMatchRule extends LineRule {
         return match.length >= index - 1 ? match[index - 1] : line
       }
     } else {
-      const regex = new RegExp(pattern)
+      const regex = new RegExp(pattern, flags)
       this.line = line => {
         const match = line.match(regex)
         return match && match[index] ? match[index] : line
@@ -1293,41 +1320,41 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
   switch (cmd) {
     case 'sub':
     case 's':
-      return new SubstitutionRule(delim, pattern, replace)
+      return new SubstitutionRule(delim, pattern, replace, rest[0] || '')
     case 'gsub':
     case 'g':
-      return new GlobalSubstitutionRule(delim, pattern, replace)
+      return new GlobalSubstitutionRule(delim, pattern, replace, rest[0] || '')
     case 'take':
     case 't':
-      return new TakeRule(delim, pattern)
+      return new TakeRule(delim, pattern, rest[0] || '')
     case 'rm':
     case 'r':
-      return new RemoveRule(delim, pattern)
+      return new RemoveRule(delim, pattern, rest[0] || '')
     case 'print':
     case 'p':
-      return new PrintRule(delim, pattern)
+      return new PrintRule(delim, pattern, rest[0] || '')
     case 'takeprint':
     case 'pt':
     case 'tp': {
-      const take = new TakeRule(delim, pattern)
-      const print = new PrintRule(delim, pattern)
+      const take = new TakeRule(delim, pattern, rest[0] || '')
+      const print = new PrintRule(delim, pattern, rest[0] || '')
       return new CombineRules(take, print)
     }
     case 'rmprint':
     case 'pr':
     case 'rp': {
-      const remove = new RemoveRule(delim, pattern)
-      const print = new PrintRule(delim, pattern)
+      const remove = new RemoveRule(delim, pattern, rest[0] || '')
+      const print = new PrintRule(delim, pattern, rest[0] || '')
       return new CombineRules(remove, print)
     }
     case 'kill':
     case 'k':
     case '!p':
     case '!print':
-      return new KillRule(delim, pattern)
+      return new KillRule(delim, pattern, replace || '')
     case 'uniq':
     case 'unique':
-      return new UniqueRule(delim, pattern)
+      return new UniqueRule(delim, pattern, replace || '')
     case 'trim':
       return new TrimRule(delim, pattern)
     case 'prepend':
@@ -1339,18 +1366,18 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
     case 'surround':
       return new SurroundRule(delim, pattern, replace)
     case 'insert':
-      return new InsertRule(delim, pattern, replace)
+      return new InsertRule(delim, pattern, replace, rest[0] || '')
     case 'on':
     case 'off':
     case 'after':
     case 'toggle':
-      return new ControlPrintingRule(cmd, delim, pattern)
+      return new ControlPrintingRule(cmd, delim, pattern, rest[0] || '')
     case 'cols':
       return new ColumnsRule(delim, pattern, replace, rest)
     default:
       if (cmd.match(/^\d+$/)) {
         const index = parseInt(cmd)
-        return new GroupMatchRule(index, delim, pattern)
+        return new GroupMatchRule(index, delim, pattern, rest[0] || '')
       }
   }
 }
@@ -1358,10 +1385,10 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
 class DocumentSortRule extends DocumentRule {
   ascending
 
-  constructor(pattern, replace, ascending = true) {
+  constructor(pattern, replace, ascending, flags) {
     super('', pattern, replace, [])
 
-    const regex = pattern && new RegExp(pattern)
+    const regex = pattern && new RegExp(pattern, flags)
     this.ascending = ascending
     this.lines = documentLines =>
       documentLines
@@ -1414,10 +1441,10 @@ class DocumentSortRule extends DocumentRule {
 class DocumentSortNumericRule extends DocumentRule {
   ascending
 
-  constructor(pattern, replace, ascending = true) {
+  constructor(pattern, replace, ascending, flags) {
     super('', pattern, replace, [])
 
-    const regex = pattern && new RegExp(pattern)
+    const regex = pattern && new RegExp(pattern, flags)
     this.ascending = ascending
     this.lines = documentLines =>
       documentLines
@@ -1541,7 +1568,7 @@ class DocumentLineNumbersRule extends DocumentRule {
  * across all the lines that match.
  */
 class DocumentSubstituteLinesRule extends DocumentRule {
-  constructor(delim, pattern, replace) {
+  constructor(delim, pattern, replace, flags) {
     requireArg('pattern', pattern)
 
     super(delim, pattern, replace, [])
@@ -1550,9 +1577,13 @@ class DocumentSubstituteLinesRule extends DocumentRule {
     if (delim === ':') {
       check = toLineRangeTest(pattern)
     } else if (delim === '`') {
-      check = line => line.includes(pattern)
+      if (flags && flags.includes('i')) {
+        check = line => line.toLowerCase().includes(pattern.toLowerCase)
+      } else {
+        check = line => line.includes(pattern)
+      }
     } else {
-      const regex = new RegExp(pattern)
+      const regex = new RegExp(pattern, flags)
       check = line => line.match(regex)
     }
 
@@ -1736,10 +1767,10 @@ function toDocumentRule([cmd, pattern, replace, rest, delim]) {
       return new DocumentCountRule()
     case '!sort':
     case 'sort':
-      return new DocumentSortRule(pattern, replace, !cmd.startsWith('!'))
+      return new DocumentSortRule(pattern, replace, !cmd.startsWith('!'), rest[0] || '')
     case '!sortn':
     case 'sortn':
-      return new DocumentSortNumericRule(pattern, replace, !cmd.startsWith('!'))
+      return new DocumentSortNumericRule(pattern, replace, !cmd.startsWith('!'), rest[0] || '')
     case 'reverse':
       return new DocumentReverseRule()
     case 'begin':
@@ -1754,7 +1785,7 @@ function toDocumentRule([cmd, pattern, replace, rest, delim]) {
       return new DocumentJoinLinesRule(pattern)
     case 'sl':
     case 'sublines':
-      return new DocumentSubstituteLinesRule(delim, pattern, replace)
+      return new DocumentSubstituteLinesRule(delim, pattern, replace, rest[0] || '')
     case 'exec':
       return new DocumentExecRule()
     case 'help':
