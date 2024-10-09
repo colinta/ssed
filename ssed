@@ -11,9 +11,12 @@ process.stdout.on('error', function (err) {
   }
 })
 
+class ArgError extends Error {
+}
+
 function requireArg(name, value) {
   if (value == null) {
-    throw Error(`Missing argument: ${name}`)
+    throw new ArgError(`Missing argument: ${name}`)
   }
 }
 
@@ -28,6 +31,14 @@ class Rule {
     this.pattern = pattern
     this.replace = replace
     this.args = args
+  }
+
+  /**
+   * ConditionalRule is given the next rule, returning either a ConditionalLineRule
+   * or a ConditionalDocumentRule
+   */
+  reduce(rule) {
+    return rule
   }
 
   /**
@@ -77,20 +88,131 @@ class LineRule extends Rule {
   afterEach(line, state, options) {}
 }
 
+class OnlyRule extends Rule {
+  rules
+
+  constructor(rules) {
+    super('', '', '', [])
+    this.rules = rules
+  }
+
+  report(lines) {
+    return lines
+  }
+
+  before(state, options) {
+    this.rules.forEach(rule => rule.before(state, options))
+  }
+
+  processLines(
+    lines,
+    state,
+    options,
+  ) {
+    return lines
+  }
+
+  processDocument(lines, options) {
+    return lines
+  }
+
+  after(state, options) {
+    this.rules.forEach(rule => rule.after(state, options))
+  }
+}
+
+class OnlyDocumentRules extends OnlyRule {
+  processDocument(lines, options) {
+    for (const documentRule of this.rules) {
+      const state = resetState()
+      const linesWithNumbers = lines.map((line, index) => [line, index + 1])
+      lines = documentRule.run(linesWithNumbers, state, options) ?? []
+    }
+    return lines
+  }
+}
+
+class OnlyLineRules extends OnlyRule {
+  processLines(
+    lines,
+    state,
+    options,
+  ) {
+    return lines.flatMap(line => {
+      state.lineNumber += 1
+
+      for (const lineRule of this.rules) {
+        lineRule.beforeEach(line, state)
+      }
+
+      let mappedLines = [line]
+      for (const lineRule of this.rules) {
+        if (mappedLines.length === 0) {
+          mappedLines = [null]
+        }
+
+        mappedLines = mappedLines.flatMap(line => {
+          let nextLines = lineRule.run(line, state.lineNumber, state)
+          if (nextLines == null) {
+            return []
+          }
+
+          if (Array.isArray(nextLines)) {
+            return nextLines.flatMap(line => line.split('\n'))
+          }
+
+          return nextLines.split('\n')
+        })
+      }
+
+      for (const lineRule of this.rules) {
+        mappedLines.forEach(line => {
+          lineRule.afterEach(line, state)
+        })
+      }
+
+      return mappedLines
+    })
+  }
+
+  report(lines, options) {
+    lines.forEach(line => options.print(line))
+    return []
+  }
+
+  blankLastLine() {
+    let blank = ''
+    for (const lineRule of this.rules) {
+      blank = lineRule.blankLastLine()
+      if (blank == null) {
+        return blank
+      }
+    }
+
+    return blank
+  }
+
+  explain() {
+    return this.rules.map(rule => rule.explain()).join('\n')
+  }
+}
+
 class DocumentRule extends Rule {
   /**
    * Runs on every rule, even if there are no lines.
    */
   run(documentLines, state, options) {
     if (documentLines.length) {
-      return this.lines(documentLines, state, options)
+      return this.lines(documentLines, options)
     }
   }
 
   /**
    * lines is an array of [line, lineNo]
    */
-  lines(documentLines, state, options) {}
+  lines(documentLines, options) {
+    return []
+  }
 }
 
 /**
@@ -175,7 +297,7 @@ class SubstitutionRule extends LineRule {
 class GlobalSubstitutionRule extends LineRule {
   constructor(delim, pattern, replace) {
     if (delim === ':') {
-      throw Error(`'gsub' does not support line numbers (use 'sub')`)
+      throw new ArgError(`'gsub' does not support line numbers (use 'sub')`)
     }
 
     replace ??= ''
@@ -223,7 +345,7 @@ class GlobalSubstitutionRule extends LineRule {
 class TakeRule extends LineRule {
   constructor(delim, pattern) {
     if (delim === ':') {
-      throw Error(`'take' does not support line numbers`)
+      throw new ArgError(`'take' does not support line numbers`)
     }
 
     super(delim, pattern, '', [])
@@ -274,7 +396,7 @@ class TakeRule extends LineRule {
 class RemoveRule extends LineRule {
   constructor(delim, pattern) {
     if (delim === ':') {
-      throw Error(`'rm' does not support line numbers`)
+      throw new ArgError(`'rm' does not support line numbers`)
     }
 
     super(delim, pattern, '', [])
@@ -440,11 +562,11 @@ class UniqueRule extends LineRule {
     super(delim, pattern, '', [])
 
     if (delim === ':') {
-      throw Error(`'uniq' does not support line numbers`)
+      throw new ArgError(`'uniq' does not support line numbers`)
     }
 
     if (delim === '`') {
-      throw Error(`'uniq' does not support literal matches`)
+      throw new ArgError(`'uniq' does not support literal matches`)
     }
 
     if (pattern) {
@@ -512,7 +634,7 @@ class TrimRule extends LineRule {
   constructor(delim, pattern) {
     super(delim, pattern, '', [])
     if (delim === ':') {
-      throw Error(`'trim' does not support line numbers`)
+      throw new ArgError(`'trim' does not support line numbers`)
     }
 
     // Set the appropriate trim function based on the pattern
@@ -846,11 +968,11 @@ class GroupMatchRule extends LineRule {
     this.index = index
 
     if (delim === ':') {
-      throw Error(`'${index}' does not support line numbers`)
+      throw new ArgError(`'${index}' does not support line numbers`)
     }
 
     if (delim === '`') {
-      throw Error(`'${index}' does not support literal matches`)
+      throw new ArgError(`'${index}' does not support literal matches`)
     }
 
     if (!pattern) {
@@ -1226,7 +1348,7 @@ class DocumentLineNumbersRule extends DocumentRule {
     if (replace) {
       const minWidth = replace ? Number(replace) : 0
       if (minWidth.isNaN()) {
-        throw Error(`Invalid width '${replace}', expected a number`)
+        throw new ArgError(`Invalid width '${replace}', expected a number`)
       } else {
         this.minWidth = minWidth
         this.pad = '0'
@@ -1339,7 +1461,7 @@ class DocumentExecRule extends DocumentRule {
     super('', '', '', [])
   }
 
-  lines(documentLines, _, options) {
+  lines(documentLines, options) {
     const input = documentLines.map(([line]) => line).join('\n')
 
     if (options.dryRun) {
@@ -1440,64 +1562,17 @@ class DocumentCountRule extends DocumentRule {
 }
 
 class DocumentLineRules extends DocumentRule {
-  lineRules
+  rule
 
   constructor(lineRules) {
     super('', '', '', [])
-    this.lineRules = lineRules
+    this.rule = new OnlyLineRules(lineRules)
   }
 
-  /**
-   * If the last line is blank, this function will be called. Default behaviour
-   * returns '', but rules can override this behaviour.
-   */
-  blankLastLine() {
-    let lastLine = ''
-    for (const lineRule of this.lineRules) {
-      lastLine = lineRule.blankLastLine()
-      if (lastLine == null) {
-        return null
-      }
-    }
-
-    return lastLine
-  }
-
-  lines(documentLines, _, options) {
+  lines(documentLines, options) {
     const state = resetState()
-
-    for (const lineRule of this.lineRules) {
-      lineRule.before?.(state)
-    }
-
     const inputLines = documentLines.map(([line]) => line)
-    const isLastLineBlank = inputLines.at(-1) === ''
-    if (isLastLineBlank) {
-      inputLines.pop()
-    }
-
-    const retLines = []
-    processLines(state, true, this.lineRules, options, retLines, inputLines)
-
-    for (const lineRule of this.lineRules) {
-      lineRule.after?.(state)
-    }
-
-    if (isLastLineBlank) {
-      let lastLine = ''
-      for (const lineRule of this.lineRules) {
-        lastLine = lineRule.blankLastLine()
-        if (lastLine == null) {
-          break
-        }
-      }
-
-      if (lastLine != null) {
-        retLines.push(lastLine)
-      }
-    }
-
-    return retLines
+    return this.rule.processLines(inputLines, state, options)
   }
 
   explain() {
@@ -1602,7 +1677,7 @@ function _toLineRangeTest(pattern, job) {
       '%$frequency-$offset (every Nth line minus offset)',
       '$range1, $range2 [, $range3] (multiple ranges)',
     ]
-    throw Error('Invalid line range pattern, expected:' + allowed.join('\n - '))
+    throw new ArgError('Invalid line range pattern, expected:' + allowed.join('\n - '))
   }
 
   if (!pattern || pattern === '*') {
@@ -1825,7 +1900,7 @@ function parseOption(options, arg, args) {
         if (fs.existsSync(file)) {
           return file
         } else {
-          throw Error(`File does not exist: ${file}`)
+          throw new ArgError(`File does not exist: ${file}`)
         }
       })
       if (files.length === 0) {
@@ -1847,58 +1922,7 @@ function parseOption(options, arg, args) {
       break
     }
     default:
-      throw Error(`Invalid option: ${option}`)
-  }
-}
-
-function processLines(
-  state,
-  hasDocumentRules,
-  lineRules,
-  options,
-  lines,
-  linesBuffer,
-) {
-  for (const line of linesBuffer) {
-    state.lineNumber += 1
-
-    for (const lineRule of lineRules) {
-      lineRule.beforeEach?.(line, state)
-    }
-
-    let mappedLines = [line]
-    for (const lineRule of lineRules) {
-      if (mappedLines.length === 0) {
-        mappedLines = [null]
-      }
-
-      mappedLines = mappedLines.flatMap(line => {
-        let nextLines = lineRule.run(line, state.lineNumber, state)
-        if (nextLines == null) {
-          return []
-        }
-
-        if (Array.isArray(nextLines)) {
-          return nextLines.flatMap(line => line.split('\n'))
-        }
-
-        return nextLines.split('\n')
-      })
-    }
-
-    for (const lineRule of lineRules) {
-      mappedLines.forEach(line => {
-        lineRule.afterEach?.(line, state)
-      })
-    }
-
-    if (mappedLines.length > 0) {
-      if (!options.diff && !hasDocumentRules) {
-        mappedLines.forEach(line => options.print(line))
-      } else {
-        lines.push(...mappedLines)
-      }
-    }
+      throw new ArgError(`Invalid option: ${option}`)
   }
 }
 
@@ -1922,9 +1946,6 @@ function main(args, options = {}) {
     },
     ...options,
   }
-
-  let lineRules = []
-  const documentRules = []
 
   const argsCopy = [...args]
   const rules = []
@@ -1986,32 +2007,72 @@ function main(args, options = {}) {
     options.input = fs.createReadStream(file)
   }
 
-  for (const rule of rules) {
-    const parsed = parseRuleArgs(rule)
+  const rulesIter = (function *() {
+    for (let index = 0; index < rules.length; index++) {
+      yield rules[index]
+    }
+  })()
 
-    let lineRule, documentRule
-    if ((lineRule = toLineRule(parsed))) {
-      lineRules.push(lineRule)
-    } else if ((documentRule = toDocumentRule(parsed))) {
-      if (lineRules.length) {
-        documentRules.push(new DocumentLineRules(lineRules))
-        lineRules = []
+  function processRules() {
+    let lineRules = []
+    const documentRules = []
+    let prevRule = null
+    for (const rule of rulesIter) {
+      if (rule === '}') {
       }
 
-      documentRules.push(documentRule)
+      if (rule === '{') {
+      } else {
+        const parsed = parseRuleArgs(rule)
+
+        let lineRule, documentRule
+        if ((lineRule = toLineRule(parsed))) {
+          if (prevRule) {
+            lineRule = prevRule.reduce(lineRule)
+          } else {
+            prevRule = lineRule
+          }
+        } else if ((documentRule = toDocumentRule(parsed))) {
+          if (lineRules.length) {
+            documentRules.push(new DocumentLineRules(lineRules))
+            lineRules = []
+          }
+
+          if (prevRule) {
+            documentRule = prevRule.reduce(documentRule)
+          } else {
+            prevRule = documentRule
+          }
+        } else {
+          throw Error(`Invalid rule: ${rule}`)
+        }
+
+        if (lineRule) {
+          lineRules.push(lineRule)
+        }
+
+        if (documentRule) {
+          documentRules.push(documentRule)
+        }
+      }
+    }
+
+    if (lineRules.length && documentRules.length) {
+      documentRules.push(new DocumentLineRules(lineRules))
+    }
+
+    if (documentRules.length) {
+      return new OnlyDocumentRules(documentRules)
     } else {
-      throw Error(`Invalid rule: ${rule}`)
+      return new OnlyLineRules(lineRules)
     }
   }
 
-  if (lineRules.length && documentRules.length) {
-    documentRules.push(new DocumentLineRules(lineRules))
-    lineRules = []
-  }
+  const onlyRule = processRules()
 
   const inputStream = lineStream(options.input)
   const originalLines = []
-  let lines = []
+  let finalLines = []
 
   // if (
   //   we only have line rules,
@@ -2023,85 +2084,16 @@ function main(args, options = {}) {
   // 2. don't store the output in lines
   // 3. output immediately
   const state = resetState()
+  onlyRule.before(state, options)
 
-  for (const lineRule of lineRules) {
-    lineRule.before?.(state)
-  }
-
-  let linesBuffer = []
   return inputStream
     .on('line', line => {
-      const original = line
-      originalLines.push(original)
-
-      linesBuffer.push(line)
-      // special handling for blank lines – if the last line is blank we skip it
-      if (line === '') {
-        return
-      }
-
-      processLines(
-        state,
-        documentRules.length > 0,
-        lineRules,
-        options,
-        lines,
-        linesBuffer,
-      )
-
-      linesBuffer = []
+      lastLine = eachLine(onlyRule, line, originalLines, finalLines, state, options)
     })
     .on('end', (keepOpen, close) => {
-      if (linesBuffer.length === 1) {
-        if (!options.diff && documentRules.length === 0) {
-          options.print('')
-        } else {
-          state.lineNumber += 1
-          lines.push('')
-        }
-      } else if (linesBuffer.length) {
-        processLines(
-          state,
-          documentRules.length > 0,
-          lineRules,
-          options,
-          lines,
-          linesBuffer,
-        )
-      }
+      finalize(onlyRule, originalLines, finalLines, state, options)
 
-      for (const lineRule of lineRules) {
-        lineRule.after?.(state)
-      }
-
-      const isLastLineBlank = lines.at(-1) === ''
-      if (isLastLineBlank) {
-        lines.pop()
-      }
-
-      for (const documentRule of documentRules) {
-        const state = resetState()
-        documentRule.before(state, options)
-
-        const linesWithNumbers = lines.map((line, index) => [line, index + 1])
-        lines = documentRule.run(linesWithNumbers, state, options) ?? []
-        documentRule.after(state, options)
-      }
-
-      const finalLines = lines ?? []
-      if (isLastLineBlank) {
-        let lastLine = ''
-        for (const documentRule of documentRules) {
-          lastLine = documentRule.blankLastLine()
-          if (lastLine == null) {
-            break
-          }
-        }
-
-        if (lastLine != null) {
-          finalLines.push('')
-        }
-      }
+      onlyRule.after(state, options)
 
       if (options.diff) {
         let inputLines = originalLines
@@ -2114,142 +2106,12 @@ function main(args, options = {}) {
           }
         }
         const linesDiff = diff(inputLines, finalLines)
+
         const hasDiff = !(
           linesDiff.length === 1 && linesDiff[0].type === 'same'
         )
         if (hasDiff) {
-          options.print(yellow(options.diffHeader, options.color))
-
-          let inputLineNumber = 1
-          let outputLineNumber = 1
-          let didPrintNumbers = false
-          function printLineNumbers(inputLineNumber, outputLineNumber) {
-            if (!didPrintNumbers) {
-              options.print(
-                magenta(
-                  `@@ -${inputLineNumber} +${outputLineNumber} @@`,
-                  options.color,
-                ),
-              )
-
-              didPrintNumbers = true
-            }
-          }
-
-          linesDiff.forEach((entry, index) => {
-            if (!entry.lines.length) {
-              return
-            }
-
-            if (entry.type === 'same') {
-              if (index === 0) {
-                didPrintNumbers = false
-
-                const printLines = entry.lines.slice(
-                  Math.max(entry.lines.length - 3, 0),
-                )
-                inputLineNumber += entry.lines.length - printLines.length
-                outputLineNumber += entry.lines.length - printLines.length
-                printLineNumbers(inputLineNumber, outputLineNumber)
-                printLines.forEach(line => options.print(' ' + line))
-                inputLineNumber += printLines.length
-                outputLineNumber += printLines.length
-              } else if (index === linesDiff.length - 1) {
-                const printLines = entry.lines.slice(0, 4)
-                printLineNumbers(inputLineNumber, outputLineNumber)
-                inputLineNumber += entry.lines.length - printLines.length
-                outputLineNumber += entry.lines.length - printLines.length
-                printLines.forEach(line => options.print(' ' + line))
-                inputLineNumber += printLines.length
-                outputLineNumber += printLines.length
-              } else if (entry.lines.length <= 5) {
-                entry.lines.forEach(line => options.print(' ' + line))
-                inputLineNumber += entry.lines.length
-                outputLineNumber += entry.lines.length
-              } else {
-                didPrintNumbers = false
-
-                const beforeLines = entry.lines.slice(0, 3)
-                const afterLines = entry.lines.slice(
-                  Math.max(entry.lines.length - 3, 0),
-                )
-                beforeLines.forEach(line => options.print(' ' + line))
-                inputLineNumber += entry.lines.length - afterLines.length
-                outputLineNumber += entry.lines.length - afterLines.length
-                printLineNumbers(inputLineNumber, outputLineNumber)
-                afterLines.forEach(line => options.print(' ' + line))
-              }
-
-              return
-            }
-
-            entry.lines.forEach(line => {
-              printLineNumbers(inputLineNumber, outputLineNumber)
-
-              if (entry.type === 'added') {
-                outputLineNumber += 1
-                options.print(green(`+${line}`, options.color))
-              } else if (entry.type === 'removed') {
-                inputLineNumber += 1
-                options.print(red(`-${line}`, options.color))
-              }
-            })
-          })
-
-          if (options.write) {
-            if (options.interactive) {
-              if (!process.stdin.isTTY) {
-                options.error(
-                  red(
-                    `Cannot run interactively – input is coming from stdin`,
-                    options.color,
-                  ),
-                )
-                process.exit(1)
-              }
-
-              options.print(
-                yellow(
-                  `Write changes to ${options.writeToFile}? [Yn] `,
-                  options.color,
-                ),
-                false,
-              )
-              keepOpen()
-
-              const stdin = lineStream(process.stdin)
-              stdin.on('line', line => {
-                if (line === '' || line === 'y' || line === 'yes') {
-                  if (options.dryRun) {
-                    options.error(
-                      yellow(`Dry Run: ${options.writeToFile}`, options.color),
-                    )
-                  } else {
-                    writeLinesToFile(finalLines, options.writeToFile)
-                  }
-                } else if (line === 'n') {
-                  options.error(
-                    yellow(`Skipping ${options.writeToFile}`, options.color),
-                  )
-                } else {
-                  options.error(
-                    red(`Unknown response '${line}'. Aborting`, options.color),
-                  )
-                  process.exit(1)
-                }
-                stdin.close()
-                close()
-              })
-            } else {
-              if (options.dryRun) {
-                options.error(
-                  yellow(`Dry Run: ${options.writeToFile}`, options.color),
-                )
-              } else {
-                writeLinesToFile(finalLines, options.writeToFile)
-              }
-            }
-          }
+          renderDiff(linesDiff, options)
         }
       } else {
         for (const line of finalLines) {
@@ -2257,6 +2119,62 @@ function main(args, options = {}) {
         }
       }
     })
+}
+
+function eachLine(onlyRule, line, originalLines, finalLines, state, options) {
+  const lastLine = originalLines.at(-1)
+  originalLines.push(line)
+
+  let nextLines = null
+  if (line === '') {
+    if (lastLine === '') {
+      // current line is '' and _previous_ line was ''
+      nextLines = ['']
+    }
+    // else nextLines will go unassigned, and the current blank line will be skipped
+    // (for now)
+  } else if (lastLine === '') {
+    nextLines = [lastLine, line]
+  } else {
+    nextLines = [line]
+  }
+
+  if (!nextLines) {
+    return
+  }
+
+  let processedLines = onlyRule.processLines(
+    nextLines,
+    state,
+    options,
+  )
+
+  if (!options.diff) {
+    processedLines = onlyRule.report(processedLines, options)
+  }
+
+  finalLines.push(...processedLines)
+}
+
+function finalize(onlyRule, originalLines, finalLines, state, options) {
+  const lastLine = originalLines.at(-1)
+
+  let isLastLineBlank = lastLine == ''
+  if (isLastLineBlank) {
+    state.lineNumber += 1
+  }
+
+  const nextLines = onlyRule.processDocument(finalLines, options)
+  if (nextLines !== finalLines) {
+    finalLines.splice(0, finalLines.length, ...nextLines)
+  }
+
+  if (isLastLineBlank) {
+    const lastLine = onlyRule.blankLastLine()
+    if (lastLine != null) {
+      finalLines.push('')
+    }
+  }
 }
 
 function delimiterTestFn(delim) {
@@ -2335,7 +2253,7 @@ function parseRuleArgs(rule) {
   if (!command) {
     const [simpleCommand] = rule.match(/^!?(\w+\b|\d+)$/) ?? []
     if (!simpleCommand) {
-      throw Error(`Invalid rule: ${rule}`)
+      throw new ArgError(`Invalid rule: ${rule}`)
     }
     return [simpleCommand, null, null, []]
   }
@@ -2353,6 +2271,8 @@ function help() {
 -----
     > ssed --help
     > something | ssed [commands]
+    > <input ssed --explain [commands]
+    > ssed [commands] <file
 
 All commands use a "g/re/p"-like syntax:
 
@@ -2373,6 +2293,8 @@ before document rules are executed.
 
 Options
 -------
+  --explain                    Explains what the command will do.
+
   --diff                       Only show differences
   --no-diff                    Do not show differences
 
@@ -2634,6 +2556,141 @@ function diff(oldLines, newLines) {
   return result
 }
 
+function renderDiff(linesDiff, options) {
+  options.print(yellow(options.diffHeader, options.color))
+
+  let inputLineNumber = 1
+  let outputLineNumber = 1
+  let didPrintNumbers = false
+  function printLineNumbers(inputLineNumber, outputLineNumber) {
+    if (!didPrintNumbers) {
+      options.print(
+        magenta(
+          `@@ -${inputLineNumber} +${outputLineNumber} @@`,
+          options.color,
+        ),
+      )
+
+      didPrintNumbers = true
+    }
+  }
+
+  linesDiff.forEach((entry, index) => {
+    if (!entry.lines.length) {
+      return
+    }
+
+    if (entry.type === 'same') {
+      if (index === 0) {
+        didPrintNumbers = false
+
+        const printLines = entry.lines.slice(
+          Math.max(entry.lines.length - 3, 0),
+        )
+        inputLineNumber += entry.lines.length - printLines.length
+        outputLineNumber += entry.lines.length - printLines.length
+        printLineNumbers(inputLineNumber, outputLineNumber)
+        printLines.forEach(line => options.print(' ' + line))
+        inputLineNumber += printLines.length
+        outputLineNumber += printLines.length
+      } else if (index === linesDiff.length - 1) {
+        const printLines = entry.lines.slice(0, 4)
+        printLineNumbers(inputLineNumber, outputLineNumber)
+        inputLineNumber += entry.lines.length - printLines.length
+        outputLineNumber += entry.lines.length - printLines.length
+        printLines.forEach(line => options.print(' ' + line))
+        inputLineNumber += printLines.length
+        outputLineNumber += printLines.length
+      } else if (entry.lines.length <= 5) {
+        entry.lines.forEach(line => options.print(' ' + line))
+        inputLineNumber += entry.lines.length
+        outputLineNumber += entry.lines.length
+      } else {
+        didPrintNumbers = false
+
+        const beforeLines = entry.lines.slice(0, 3)
+        const afterLines = entry.lines.slice(
+          Math.max(entry.lines.length - 3, 0),
+        )
+        beforeLines.forEach(line => options.print(' ' + line))
+        inputLineNumber += entry.lines.length - afterLines.length
+        outputLineNumber += entry.lines.length - afterLines.length
+        printLineNumbers(inputLineNumber, outputLineNumber)
+        afterLines.forEach(line => options.print(' ' + line))
+      }
+
+      return
+    }
+
+    entry.lines.forEach(line => {
+      printLineNumbers(inputLineNumber, outputLineNumber)
+
+      if (entry.type === 'added') {
+        outputLineNumber += 1
+        options.print(green(`+${line}`, options.color))
+      } else if (entry.type === 'removed') {
+        inputLineNumber += 1
+        options.print(red(`-${line}`, options.color))
+      }
+    })
+  })
+
+  if (options.write) {
+    if (options.interactive) {
+      if (!process.stdin.isTTY) {
+        options.error(
+          red(
+            `Cannot run interactively – input is coming from stdin`,
+            options.color,
+          ),
+        )
+        process.exit(1)
+      }
+
+      options.print(
+        yellow(
+          `Write changes to ${options.writeToFile}? [Yn] `,
+          options.color,
+        ),
+        false,
+      )
+      keepOpen()
+
+      const stdin = lineStream(process.stdin)
+      stdin.on('line', line => {
+        if (line === '' || line === 'y' || line === 'yes') {
+          if (options.dryRun) {
+            options.error(
+              yellow(`Dry Run: ${options.writeToFile}`, options.color),
+            )
+          } else {
+            writeLinesToFile(finalLines, options.writeToFile)
+          }
+        } else if (line === 'n') {
+          options.error(
+            yellow(`Skipping ${options.writeToFile}`, options.color),
+          )
+        } else {
+          options.error(
+            red(`Unknown response '${line}'. Aborting`, options.color),
+          )
+          process.exit(1)
+        }
+        stdin.close()
+        close()
+      })
+    } else {
+      if (options.dryRun) {
+        options.error(
+          yellow(`Dry Run: ${options.writeToFile}`, options.color),
+        )
+      } else {
+        writeLinesToFile(finalLines, options.writeToFile)
+      }
+    }
+  }
+}
+
 if (!Array.prototype.toSorted) {
   Array.prototype.toSorted = function (compareFn) {
     return [...this].sort(compareFn)
@@ -2650,5 +2707,9 @@ try {
   // remove 'node' and 'ssed' from argv
   main(process.argv.slice(2))
 } catch (e) {
-  process.stderr.write(`ssed: ${e.message}\n`)
+  if (e instanceof ArgError) {
+    process.stderr.write(`ssed: ${e.message}\n`)
+  } else {
+    throw e
+  }
 }
