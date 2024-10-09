@@ -1,6 +1,6 @@
 {
   "name": "ssed",
-  "version": "1.3.0",
+  "version": "1.4.2",
   "description": "Fed up with trying to remember sed's weird regex support? Me, too.",
   "main": "ssed",
   "directories": {
@@ -11,7 +11,7 @@
     "ssed": "./ssed"
   },
   "scripts": {
-    "prepublishOnly": "<ssed ssed 'after/help' 'off/END HELP' '1/(Usage:)/' --write=README.md"
+    "prepublishOnly": "<ssed ssed 'after/function help' 'off/END HELP' '1/(Usage)/' --write=README.md"
   },
   "repository": {
     "type": "git",

@@ -2,6 +2,8 @@ Usage
 -----
     > ssed --help
     > something | ssed [commands]
+    > <input ssed --explain [commands]
+    > ssed [commands] <file
 
 All commands use a "g/re/p"-like syntax:
 
@@ -22,6 +24,8 @@ before document rules are executed.
 
 Options
 -------
+  --explain                    Explains what the command will do.
+
   --diff                       Only show differences
   --no-diff                    Do not show differences
 
@@ -97,6 +101,21 @@ Document Rules
     border:{prepend}:{append}     Prepend, append, or surround the document (add header/footer)
     end:{append}
     join     join/{separator}     Join lines with a space (or optional separator)
+
+Conditions
+----------
+You can apply rules only under certain conditions, e.g. 'if/{pattern} {rule}'
+only runs \`rule\` only lines that match \`pattern\`.
+
+You can even group rules using \`{ rules… }\`, and rules can be negated with a
+preceding '!'.
+
+    if/{pattern} {rule}
+    !if/{pattern} {rule}
+    between/{on-pattern}/{off-pattern} {rule}
+
+Example:
+    ssed 'if/first-name|last-name' { s/Colin/REDACTED/i s/Gray/REDACTED/i }
 
 Separators
 ----------
