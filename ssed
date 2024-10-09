@@ -2560,7 +2560,7 @@ function help() {
 
 All commands use a "g/re/p"-like syntax:
 
-    cmd/match[/replace]
+    cmd/match[/replace][/flags]
 
 About
 -----
@@ -2575,85 +2575,109 @@ employed, support STDIN streaming.
 Document rules transform the entire document. STDIN is read to completion
 before document rules are executed.
 
+Like sed, and symbol can be used to separate the rule arguments, but unlike sed
+*some* separators change the behaviour of the command. The special separators
+*are ':' and '\`'.
+
+Separators
+----------
+The separator can change the behaviour of the line rule. Rules that support
+pattern matches likely also support line and literal matches.
+
+    /  Default separator, indicates Regex. Supports flags.
+    :  Indicates a line-number rule
+    \`  Indicates a literal string match
+       All other delimiters indicate Regex
+
+    s/\\w+/bar      regex match
+    s|\\w+|bar      alternative separator
+    s|\\w+|bar|i    with case insensitive flag enabled
+
+    s\`foo\`bar      literal match against 'foo'
+    s:1:bar        matches line 1
+
+    s{\\w+}bar      brackets can also be used (regex match)
+    s{\\w+}bar}i    but they don't have to match
+
 Options
 -------
-  --explain                    Explains what the command will do.
+    --explain                    Explains what the command will do.
 
-  --diff                       Only show differences
-  --no-diff                    Do not show differences
+    --diff                       Only show differences
+    --no-diff                    Do not show differences
 
-  --color                      Enable ANSI colors (true if stdout is a TTY)
-  --no-color                   Disable ANSI colors
+    --color                      Enable ANSI colors (true if stdout is a TTY)
+    --no-color                   Disable ANSI colors
 
-  --ls                         Read file names from standard input (\`ls | ssed --ls\`)
+    --ls                         Read file names from standard input (\`ls | ssed --ls\`)
 
-  --input=fromfile             Use 'fromfile' as input.
-  --input fromfile
+    --input=fromfile             Use 'fromfile' as input.
+    --input fromfile
 
-  --input=fromfile1,fromfile2  Run against multiple files.
-  --input fromfile1 --input fromfile2
+    --input=fromfile1,fromfile2  Run against multiple files.
+    --input fromfile1 --input fromfile2
 
-  --no-input                   Do not use any file as input.
+    --no-input                   Do not use any file as input.
 
-  --write                      Write each changed file in place.
-  --write=tofile               Provide a destination file name.
-  --write-rename=%.backup      Use the input filename in place of '%'
-  --no-write                   Do not write each changed file in place.
+    --write                      Write each changed file in place.
+    --write=tofile               Provide a destination file name.
+    --write-rename=%.backup      Use the input filename in place of '%'
+    --no-write                   Do not write each changed file in place.
 
-  --interactive                Ask before writing the file
-  --no-interactive             Do not ask before writing the file
+    --interactive                Ask before writing the file
+    --no-interactive             Do not ask before writing the file
 
-  --dry-run (-n)               Show which files would be affected.
-  --no-dry-run                 Do not show which files would be affected.
+    --dry-run (-n)               Show which files would be affected.
+    --no-dry-run                 Do not show which files would be affected.
 
 Line Rules
 ----------
 Line rules operate on every line. Commands 'on', 'after' and 'off' share the
 on/off state.
 
-    s/search/replace (aka sub/…/…)   Replace the first instance of 'search' with 'replace'
-    g/search/replace (aka gsub/…/…)  Replace every instance of 'search' with 'replace'
-    t/pattern (aka take/…)           Only print the matching part of the line, or print the entire line if 'pattern' doesn't match
-    r/pattern (aka rm/…)             Remove the matching part of the line, or print the entire line if 'pattern' doesn't match
-    1/pattern                        Only print the first group of the match
-    1                                Only print the first "column" (columns are separated by whitespace)
-    cols/pattern/columns             Split the line by 'pattern' (default is /\\s+/) and print columns
-                                     - columns can be separated by commas
-                                     - columns are joined by ' '
-    cols/pattern/columns/joiner      - columns are joiner by $joiner
+    s/$search/$replace                Replace the first instance of 'search' with 'replace'
+    (aka sub/…/…)
+    g/$search/$replace                Replace every instance of 'search' with 'replace'
+    (aka gsub/…/…)
+    t/$pattern (aka take/…)         Only print the matching part of the line, or print the entire line if 'pattern' doesn't match
+    r/$pattern (aka rm/…)           Remove the matching part of the line, or print the entire line if 'pattern' doesn't match
+    1/$pattern                      Only print the first group of the match
+    1                               Only print the first "column" (columns are separated by whitespace)
+    cols/$pattern/$columns          Split the line by 'pattern' (default is /\\s+/) and print columns (joined by ' ')
+    cols/$pattern/$columns/$joiner  Same, but columns are joiner by $joiner
 
-    on/pattern                       Start printing on the line where 'pattern' is matched
-    off/pattern                      Stop printing on the line where 'pattern' is matched
-    after/pattern                    Start printing on the line *after* 'pattern' is matched
-    toggle/pattern                   Turn printing off at the matching line, then off, then on...
+    on/$pattern                     Start printing on the line where 'pattern' is matched
+    off/$pattern                    Stop printing on the line where 'pattern' is matched
+    after/$pattern                  Start printing on the line *after* 'pattern' is matched
+    toggle/$pattern                 Turn printing off at the matching line, then off, then on...
 
-    p/pattern (aka print/…)          Only print lines that match 'pattern'
-    k/pattern (aka kill/…)           Do not print lines that match 'pattern'
-    !p/pattern (aka !print/…)        Alias for k/kill because I can't remember one (k) and always remember the other (p)
+    p/$pattern (aka print/…)        Only print lines that match 'pattern'
+    k/$pattern (aka kill/…)         Do not print lines that match 'pattern'
+    !p/$pattern (aka !print/…)      Alias for k/kill because I can't remember one (k) and always remember the other (p)
 
-    prepend/text (aka prefix/…)
-    append/text (aka suffix/…)       Adds text to the beginning (prepend) or end (append) of the line
-    surround/prefix/suffix
+    prepend/$text (aka prefix/…)
+    append/$text (aka suffix/…)     Adds text to the beginning (prepend) or end (append) of the line
+    surround/$prefix/$suffix
 
-    uniq (aka unique)                Only print unique lines
-    uniq/pattern                     Only print matching lines, and only unique matches (uniqueness is determined by the matching regex)
+    uniq (aka unique)               Only print unique lines
+    uniq/$pattern                   Only print matching lines, and only unique matches (uniqueness is determined by the matching regex)
 
 Document Rules
 --------------
-    sublines/{pattern}/{replace}  For every line that matches, insert one line from replace. Remaining lines will
+    sublines/$pattern/$replace    For every line that matches, insert one line from replace. Remaining lines will
          (aka sl/…)               be inserted into the last matched line. Does not do regex replacement.
 
-    sort  sort/{pattern}          Sort the lines alphabetically using localeCompare.
+    sort  sort/$pattern           Sort the lines alphabetically using localeCompare.
                                   If a pattern is provided, the matching part of the line will be used, but the
                                   entire line will be printed.
-    sortn   sortn/pattern         Sort the lines numerically. If no pattern is given, it matches the *first* number.
+    sortn   sortn/$pattern        Sort the lines numerically. If no pattern is given, it matches the *first* number.
     reverse                       Obvious
     line                          Prepend each line with the line number
 
-    begin:{prepend}
-    border:{prepend}:{append}     Prepend, append, or surround the document (add header/footer)
-    end:{append}
-    join     join/{separator}     Join lines with a space (or optional separator)
+    begin:$prepend
+    border:$prepend:$append       Prepend, append, or surround the document (add header/footer)
+    end:$append
+    join     join/$separator      Join lines with a space (or optional separator)
 
 Conditions
 ----------
@@ -2663,27 +2687,12 @@ only runs \`rule\` only lines that match \`pattern\`.
 You can even group rules using \`{ rules… }\`, and rules can be negated with a
 preceding '!'.
 
-    if/{pattern} {rule}
-    !if/{pattern} {rule}
-    between/{on-pattern}/{off-pattern} {rule}
+    if/$pattern $rule
+    !if/$pattern $rule
+    between/$onPattern/$offPattern $rule
 
 Example:
-    ssed 'if/first-name|last-name' { s/Colin/REDACTED/i s/Gray/REDACTED/i }
-
-Separators
-----------
-The separator can change the behaviour of the line rule. Rules that support
-pattern matches likely also support line and literal matches.
-
-    /  Default separator, indicates Regex
-    :  Indicates a line-number rule
-    \`  Indicates a literal string match
-       All other delimiters indicate Regex
-
-    s/\\w+/bar
-    s\`foo\`bar/
-    s|\\w+|bar
-    s{\\w+}bar
+    ssed 'if/first-name|last-name' { s/colin/REDACTED/i s/gray/REDACTED/i }
 
 Line Number rules
 -----------------
