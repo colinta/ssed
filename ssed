@@ -47,17 +47,17 @@ class Rule {
   before(state, options) {}
 
   /**
+   * Run after all lines have processed.
+   */
+  after(state, options) {}
+
+  /**
    * If the last line is blank, this function will be called. Default behaviour
    * returns '', but rules can override this behaviour.
    */
   blankLastLine() {
     return ''
   }
-
-  /**
-   * Run after all lines have processed.
-   */
-  after(state, options) {}
 
   explain() {
     return ''
@@ -104,11 +104,7 @@ class OnlyRule extends Rule {
     this.rules.forEach(rule => rule.before(state, options))
   }
 
-  processLines(
-    lines,
-    state,
-    options,
-  ) {
+  processLines(lines, state, options) {
     return lines
   }
 
@@ -133,11 +129,7 @@ class OnlyDocumentRules extends OnlyRule {
 }
 
 class OnlyLineRules extends OnlyRule {
-  processLines(
-    lines,
-    state,
-    options,
-  ) {
+  processLines(lines, state, options) {
     return lines.flatMap(line => {
       state.lineNumber += 1
 
@@ -1120,89 +1112,69 @@ class CombineRules extends LineRule {
 }
 
 function toLineRule([cmd, pattern, replace, rest, delim]) {
-  let rule
   switch (cmd) {
     case 'sub':
     case 's':
-      rule = new SubstitutionRule(delim, pattern, replace)
-      break
+      return new SubstitutionRule(delim, pattern, replace)
     case 'gsub':
     case 'g':
-      rule = new GlobalSubstitutionRule(delim, pattern, replace)
-      break
+      return new GlobalSubstitutionRule(delim, pattern, replace)
     case 'take':
     case 't':
-      rule = new TakeRule(delim, pattern)
-      break
+      return new TakeRule(delim, pattern)
     case 'rm':
     case 'r':
-      rule = new RemoveRule(delim, pattern)
-      break
+      return new RemoveRule(delim, pattern)
     case 'print':
     case 'p':
-      rule = new PrintRule(delim, pattern)
-      break
+      return new PrintRule(delim, pattern)
     case 'takeprint':
     case 'pt':
     case 'tp': {
       const take = new TakeRule(delim, pattern)
       const print = new PrintRule(delim, pattern)
-      rule = new CombineRules(take, print)
-      break
+      return new CombineRules(take, print)
     }
     case 'rmprint':
     case 'pr':
     case 'rp': {
       const remove = new RemoveRule(delim, pattern)
       const print = new PrintRule(delim, pattern)
-      rule = new CombineRules(remove, print)
-      break
+      return new CombineRules(remove, print)
     }
     case 'kill':
     case 'k':
     case '!p':
     case '!print':
-      rule = new KillRule(delim, pattern)
-      break
+      return new KillRule(delim, pattern)
     case 'uniq':
     case 'unique':
-      rule = new UniqueRule(delim, pattern)
-      break
+      return new UniqueRule(delim, pattern)
     case 'trim':
-      rule = new TrimRule(delim, pattern)
-      break
+      return new TrimRule(delim, pattern)
     case 'prepend':
     case 'prefix':
-      rule = new PrependRule(delim, pattern)
-      break
+      return new PrependRule(delim, pattern)
     case 'append':
     case 'suffix':
-      rule = new AppendRule(delim, pattern)
-      break
+      return new AppendRule(delim, pattern)
     case 'surround':
-      rule = new SurroundRule(delim, pattern, replace)
-      break
+      return new SurroundRule(delim, pattern, replace)
     case 'insert':
-      rule = new InsertRule(delim, pattern, replace)
-      break
+      return new InsertRule(delim, pattern, replace)
     case 'on':
     case 'off':
     case 'after':
     case 'toggle':
-      rule = new ControlPrintingRule(cmd, delim, pattern)
-      break
+      return new ControlPrintingRule(cmd, delim, pattern)
     case 'cols':
-      rule = new ColumnsRule(delim, pattern, replace, rest)
-      break
+      return new ColumnsRule(delim, pattern, replace, rest)
     default:
       if (cmd.match(/^\d+$/)) {
         const index = parseInt(cmd)
-        rule = new GroupMatchRule(index, delim, pattern)
+        return new GroupMatchRule(index, delim, pattern)
       }
-      break
   }
-
-  return rule
 }
 
 class DocumentSortRule extends DocumentRule {
@@ -1491,13 +1463,13 @@ class DocumentSurroundRule extends DocumentRule {
     this.appendLines = appendText === '' ? [] : appendText.split('\n')
   }
 
-  blankLastLine() {
-    return null
-  }
-
   lines(documentLines) {
     const lines = documentLines.map(([line]) => line)
     return [...this.prependLines, ...lines, ...this.appendLines]
+  }
+
+  blankLastLine() {
+    return null
   }
 
   explain() {
@@ -1530,12 +1502,12 @@ class DocumentJoinLinesRule extends DocumentRule {
     this.joiner = joiner || ' '
   }
 
-  blankLastLine() {
-    return null
-  }
-
   lines(documentLines) {
     return [documentLines.map(([line]) => line).join(this.joiner)]
+  }
+
+  blankLastLine() {
+    return null
   }
 
   explain() {
@@ -1548,12 +1520,12 @@ class DocumentCountRule extends DocumentRule {
     super('', '', '', [])
   }
 
-  blankLastLine() {
-    return null
-  }
-
   lines(documentLines) {
     return [[documentLines.length.toString()]]
+  }
+
+  blankLastLine() {
+    return null
   }
 
   explain() {
@@ -1620,9 +1592,6 @@ function toDocumentRule([cmd, pattern, replace, rest, delim]) {
     case 'docappend':
     case 'docsuffix':
       console.error('`' + cmd + '` is deprecated, use `end` instead')
-      process.exit(1)
-    default:
-      console.error('Unknown command: ' + cmd)
       process.exit(1)
   }
 }
@@ -2007,7 +1976,7 @@ function main(args, options = {}) {
     options.input = fs.createReadStream(file)
   }
 
-  const rulesIter = (function *() {
+  const rulesIter = (function* () {
     for (let index = 0; index < rules.length; index++) {
       yield rules[index]
     }
@@ -2088,7 +2057,14 @@ function main(args, options = {}) {
 
   return inputStream
     .on('line', line => {
-      lastLine = eachLine(onlyRule, line, originalLines, finalLines, state, options)
+      lastLine = eachLine(
+        onlyRule,
+        line,
+        originalLines,
+        finalLines,
+        state,
+        options,
+      )
     })
     .on('end', (keepOpen, close) => {
       finalize(onlyRule, originalLines, finalLines, state, options)
@@ -2143,11 +2119,7 @@ function eachLine(onlyRule, line, originalLines, finalLines, state, options) {
     return
   }
 
-  let processedLines = onlyRule.processLines(
-    nextLines,
-    state,
-    options,
-  )
+  let processedLines = onlyRule.processLines(nextLines, state, options)
 
   if (!options.diff) {
     processedLines = onlyRule.report(processedLines, options)
@@ -2514,9 +2486,9 @@ function diff(oldLines, newLines) {
       let rhRemoveCount = 0
       let rhAddCount = 0
       while (
-        newIndex + rhAddCount < newLines.length &&(
-          newLines[newIndex + rhAddCount].trim() === '' ||
-        oldLines.indexOf(newLines[newIndex + rhAddCount], oldIndex) === -1)
+        newIndex + rhAddCount < newLines.length &&
+        (newLines[newIndex + rhAddCount].trim() === '' ||
+          oldLines.indexOf(newLines[newIndex + rhAddCount], oldIndex) === -1)
       ) {
         rhAddCount++
       }
@@ -2648,10 +2620,7 @@ function renderDiff(linesDiff, options) {
       }
 
       options.print(
-        yellow(
-          `Write changes to ${options.writeToFile}? [Yn] `,
-          options.color,
-        ),
+        yellow(`Write changes to ${options.writeToFile}? [Yn] `, options.color),
         false,
       )
       keepOpen()
@@ -2681,9 +2650,7 @@ function renderDiff(linesDiff, options) {
       })
     } else {
       if (options.dryRun) {
-        options.error(
-          yellow(`Dry Run: ${options.writeToFile}`, options.color),
-        )
+        options.error(yellow(`Dry Run: ${options.writeToFile}`, options.color))
       } else {
         writeLinesToFile(finalLines, options.writeToFile)
       }
