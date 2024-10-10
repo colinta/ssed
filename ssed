@@ -141,10 +141,6 @@ class OnlyLineRules extends OnlyRule {
 
       let mappedLines = [line]
       for (const lineRule of this._rules) {
-        if (mappedLines.length === 0) {
-          mappedLines = [null]
-        }
-
         mappedLines = mappedLines.flatMap(line => {
           let nextLines = lineRule.run(line, state.lineNumber, state)
           if (nextLines == null) {
@@ -216,9 +212,7 @@ class DocumentRule extends Rule {
    * Runs on every rule, even if there are no lines.
    */
   run(documentLines, state, options) {
-    if (documentLines.length) {
-      return this.lines(documentLines, options)
-    }
+    return this.lines(documentLines, options)
   }
 
   /**
@@ -268,7 +262,7 @@ class IfConditionRule extends ConditionalRule {
 
 class BetweenConditionRule extends ConditionalRule {
   constructor(delim, startPattern, stopPattern, flags) {
-    super(delim, '', '', [])
+    super(delim, startPattern, stopPattern, [])
 
     let checkStart, checkStop
     if (delim === ':') {
@@ -297,7 +291,15 @@ class BetweenConditionRule extends ConditionalRule {
   }
 
   explain(_rules) {
-    return `if ${explainPattern(this.delim, this.pattern, 'pattern')} matches`
+    return `starting at lines matching ${explainPattern(
+      this.delim,
+      this.pattern,
+      'pattern',
+    )} and stopping at lines matching ${explainPattern(
+      this.delim,
+      this.replace,
+      'pattern',
+    )}`
   }
 }
 
@@ -407,22 +409,49 @@ class ConditionalDocumentRule extends DocumentRule {
   }
 
   before(state, options) {
+    this.condRule.before(state, options)
     this.documentRule.before(state, options)
   }
 
-  run(documentLines, _state, options) {
-    if (document == null) {
+  run(documentLines, state, options) {
+    if (documentLines == null) {
       return
     }
 
-    const state = resetState()
-    const matchingLines = documentLines.filter(([line, lineNo]) =>
-      this.check(line, lineNo, state),
-    )
-    return this.documentRule.run(matchingLines, state, options)
+    let didMatch = false
+    let buffer = []
+    let returnLines = []
+    for (const [line, lineNo] of documentLines) {
+      if (this.condRule.check(line, lineNo, state)) {
+        if (!didMatch && buffer.length) {
+          returnLines.push(...buffer)
+          buffer = []
+        }
+        didMatch = true
+        buffer.push(line)
+      } else {
+        if (didMatch && buffer.length) {
+          const processedLines = this.documentRule.processDocument(buffer, options)
+          returnLines.push(...processedLines)
+          buffer = []
+        }
+        didMatch = false
+        buffer.push(line)
+      }
+    }
+
+    if (didMatch) {
+      const processedLines = this.documentRule.processDocument(buffer, options)
+      returnLines.push(...processedLines)
+    } else if (!didMatch && buffer.length) {
+      returnLines.push(...buffer)
+    }
+
+    return returnLines
   }
 
   after(state, options) {
+    this.condRule.after(state, options)
     this.documentRule.after(state, options)
   }
 
@@ -571,6 +600,12 @@ class GlobalSubstitutionRule extends LineRule {
     } else {
       const regex = new RegExp(pattern, 'g' + flags)
       this.line = line => line.replace(regex, replace)
+    }
+  }
+
+  run(line, lineNo, state, options) {
+    if (line != null) {
+      return this.line(line, lineNo)
     }
   }
 
@@ -763,7 +798,7 @@ class KillRule extends LineRule {
   check
 
   constructor(delim, pattern, flags) {
-    super(delim, pattern, '', [])
+    super(delim, pattern ?? '', '', [])
 
     if (delim === ':') {
       this.check = toLineRangeTest(pattern)
@@ -771,7 +806,9 @@ class KillRule extends LineRule {
       this.check = line => line.includes(pattern)
     } else {
       const regex = new RegExp(pattern, flags)
-      this.check = line => line.match(regex)
+      this.check = line => {
+        return line.match(regex)
+      }
     }
   }
 
@@ -780,6 +817,10 @@ class KillRule extends LineRule {
   }
 
   explain(_rules) {
+    if (!this.pattern && this.delim !== ':') {
+      return 'Remove all lines'
+    }
+
     return `Remove ${explainPattern(
       this.delim,
       this.pattern,
@@ -1635,9 +1676,9 @@ class DocumentLineNumbersRule extends DocumentRule {
   }
 
   explain(_rules) {
-    const leading = `Add line numbers to each line`
+    let leading = `Add line numbers to each line`
     if (this.pattern !== ':') {
-      leading +=` with '${this.pattern ?? ':'}' as separator`
+      leading += ` with '${this.pattern ?? ':'}' as separator`
     }
 
     if (this.minWidth) {
@@ -1910,6 +1951,9 @@ function toDocumentRule([cmd, pattern, replace, rest, delim]) {
 }
 
 function escapeRegex(pattern) {
+  if (pattern == null) {
+    throw new Error('Pattern is required')
+  }
   return pattern.replaceAll('/', '\\/')
 }
 
@@ -1949,7 +1993,7 @@ function _toLineRangeTest(pattern, job) {
   const valid = new RegExp(
     `^\\*|(${matchModulo.source}|${matchRange.source})(\s*,\s*(${matchModulo.source}|${matchRange.source}))*$`,
   )
-  if (!pattern.match(valid)) {
+  if (!pattern || !pattern.match(valid)) {
     const allowed = [
       '',
       '* (all lines)',
