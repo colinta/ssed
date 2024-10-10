@@ -125,6 +125,7 @@ class OnlyDocumentRules extends OnlyRule {
       const linesWithNumbers = lines.map((line, index) => [line, index + 1])
       lines = documentRule.run(linesWithNumbers, state, options) ?? []
     }
+
     return lines
   }
 }
@@ -241,7 +242,7 @@ class ConditionalRule extends Rule {
     return new ConditionalDocumentRule(this, rule)
   }
 
-  check(line, lineNo) {
+  check(line, lineNo, state) {
     throw Error('Not implemented')
   }
 }
@@ -279,9 +280,10 @@ class ConditionalAndRule extends ConditionalRule {
     return [this.prevRule, this.nextRule].flatMap(rule => rule.rules())
   }
 
-  check(line, lineNo) {
+  check(line, lineNo, state) {
     return (
-      this.prevRule.check(line, lineNo) && this.nextRule.check(line, lineNo)
+      this.prevRule.check(line, lineNo, state) &&
+      this.nextRule.check(line, lineNo, state)
     )
   }
 
@@ -325,7 +327,7 @@ class ConditionalLineRule extends LineRule {
       return
     }
 
-    if (this.condRule.check(line, lineNo)) {
+    if (this.condRule.check(line, lineNo, state)) {
       const conditionState = resetState()
       conditionState.lineNumber = lineNo - 1
       return this.lineRule.processLines([line], conditionState, options)
@@ -373,14 +375,14 @@ class ConditionalDocumentRule extends DocumentRule {
     this.documentRule.before(state, options)
   }
 
-  run(documentLines, state, options) {
+  run(documentLines, _state, options) {
     if (document == null) {
       return
     }
 
-    // should 'state' be reset for the documentRule?
+    const state = resetState()
     const matchingLines = documentLines.filter(([line, lineNo]) =>
-      this.check(line, lineNo),
+      this.check(line, lineNo, state),
     )
     return this.documentRule.run(matchingLines, state, options)
   }
@@ -1596,11 +1598,13 @@ class DocumentLineNumbersRule extends DocumentRule {
   }
 
   explain(_rules) {
-    const leading = `Add line numbers to each line with '${
-      this.pattern ?? ':'
-    }' as separator`
+    const leading = `Add line numbers to each line`
+    if (this.pattern !== ':') {
+      leading +=` with '${this.pattern ?? ':'}' as separator`
+    }
+
     if (this.minWidth) {
-      return ` and padding with '${this.replace ? '0' : 'spaces'}'`
+      leading += ` and padding with '${this.replace ? '0' : 'spaces'}'`
     }
 
     return leading
@@ -1805,7 +1809,7 @@ class DocumentLineRules extends DocumentRule {
   }
 
   explain(rules) {
-    return this.lineRules.map(rule => rule.explain(rules)).join('\n')
+    return this.rule._rules.map(rule => rule.explain(rules)).join('\n')
   }
 }
 
@@ -2401,7 +2405,8 @@ function processRules(rulesIter) {
   let lineRules = []
   const documentRules = []
   let prevCondRule = null
-  for (const rule of rulesIter) {
+  let value, done
+  while (({value: rule, done} = rulesIter.next()) && !done) {
     if (rule === '}') {
       break
     }
