@@ -11,8 +11,7 @@ process.stdout.on('error', function (err) {
   }
 })
 
-class ArgError extends Error {
-}
+class ArgError extends Error {}
 
 function requireArg(name, value) {
   if (value == null) {
@@ -114,7 +113,6 @@ class OnlyRule extends Rule {
   }
 
   explain() {
-
     const rules = this._rules.flatMap(rule => rule.rules())
     return this._rules.map(rule => rule.explain(rules)).join('\n')
   }
@@ -263,11 +261,7 @@ class IfConditionRule extends ConditionalRule {
   }
 
   explain(_rules) {
-    return `if ${explainPattern(
-      this.delim,
-      this.pattern,
-      'pattern',
-    )} matches`
+    return `if ${explainPattern(this.delim, this.pattern, 'pattern')} matches`
   }
 }
 
@@ -286,7 +280,9 @@ class ConditionalAndRule extends ConditionalRule {
   }
 
   check(line, lineNo) {
-    return this.prevRule.check(line, lineNo) && this.nextRule.check(line, lineNo)
+    return (
+      this.prevRule.check(line, lineNo) && this.nextRule.check(line, lineNo)
+    )
   }
 
   reduceConditionRule(rule) {
@@ -294,7 +290,9 @@ class ConditionalAndRule extends ConditionalRule {
   }
 
   explain(rules) {
-    return `${this.prevRule.explain(rules)}\n  && ${this.nextRule.explain(rules)}`
+    return `${this.prevRule.explain(rules)}\n  && ${this.nextRule.explain(
+      rules,
+    )}`
   }
 }
 
@@ -351,7 +349,9 @@ class ConditionalLineRule extends LineRule {
   }
 
   explain(rules) {
-    return `Only apply the following rule ${this.condRule.explain(rules)}:\n${indent(this.lineRule.explain(rules))}`
+    return `Only apply the following rule ${this.condRule.explain(
+      rules,
+    )}:\n${indent(this.lineRule.explain(rules))}`
   }
 }
 
@@ -380,7 +380,7 @@ class ConditionalDocumentRule extends DocumentRule {
 
     // should 'state' be reset for the documentRule?
     const matchingLines = documentLines.filter(([line, lineNo]) =>
-      this.check(line, lineNo)
+      this.check(line, lineNo),
     )
     return this.documentRule.run(matchingLines, state, options)
   }
@@ -394,14 +394,16 @@ class ConditionalDocumentRule extends DocumentRule {
   }
 
   explain(rules) {
-    return `Only apply the following rule ${this.condRule.explain(rules)}:\n${indent(this.documentRule.explain(rules))}`
+    return `Only apply the following rule ${this.condRule.explain(
+      rules,
+    )}:\n${indent(this.documentRule.explain(rules))}`
   }
 }
 
 function toCondRule([cmd, pattern, replace, rest, delim]) {
   switch (cmd) {
-  case 'if':
-    return new IfConditionRule(delim, pattern, replace || '')
+    case 'if':
+      return new IfConditionRule(delim, pattern, replace || '')
   }
 }
 
@@ -453,7 +455,11 @@ class SubstitutionRule extends LineRule {
         this.line = line => {
           const index = line.toLowerCase().indexOf(pattern.toLowerCase())
           if (~index) {
-            return line.slice(0, index) + replace + line.slice(index + pattern.length)
+            return (
+              line.slice(0, index) +
+              replace +
+              line.slice(index + pattern.length)
+            )
           }
 
           return line
@@ -1134,7 +1140,9 @@ class ControlPrintingRule extends LineRule {
   }
 
   explain(rules) {
-    const firstIndex = rules.findIndex(rule => rule instanceof ControlPrintingRule)
+    const firstIndex = rules.findIndex(
+      rule => rule instanceof ControlPrintingRule,
+    )
     const myIndex = rules.findIndex(rule => rule === this)
     const isFirst = firstIndex === myIndex
 
@@ -1145,19 +1153,27 @@ class ControlPrintingRule extends LineRule {
     )
 
     if (this.cmd === 'on') {
-      return `Printing ${isFirst ? 'starts off, and ' : ''}is turned on at ${matchingLines}`
+      return `Printing ${
+        isFirst ? 'starts off, and ' : ''
+      }is turned on at ${matchingLines}`
     }
 
     if (this.cmd === 'off') {
-      return `Printing ${isFirst ? 'starts on, and ' : ''}is turned off at ${matchingLines}`
+      return `Printing ${
+        isFirst ? 'starts on, and ' : ''
+      }is turned off at ${matchingLines}`
     }
 
     if (this.cmd === 'toggle') {
-      return `Printing ${isFirst ? 'starts on, and ' : ''}is toggled at ${matchingLines}`
+      return `Printing ${
+        isFirst ? 'starts on, and ' : ''
+      }is toggled at ${matchingLines}`
     }
 
     // cmd === 'after'
-    return `Printing ${isFirst ? 'starts off, and ' : ''}is turned on after ${matchingLines}`
+    return `Printing ${
+      isFirst ? 'starts off, and ' : ''
+    }is turned on after ${matchingLines}`
   }
 }
 
@@ -1799,10 +1815,20 @@ function toDocumentRule([cmd, pattern, replace, rest, delim]) {
       return new DocumentCountRule()
     case '!sort':
     case 'sort':
-      return new DocumentSortRule(pattern, replace, !cmd.startsWith('!'), rest[0] || '')
+      return new DocumentSortRule(
+        pattern,
+        replace,
+        !cmd.startsWith('!'),
+        rest[0] || '',
+      )
     case '!sortn':
     case 'sortn':
-      return new DocumentSortNumericRule(pattern, replace, !cmd.startsWith('!'), rest[0] || '')
+      return new DocumentSortNumericRule(
+        pattern,
+        replace,
+        !cmd.startsWith('!'),
+        rest[0] || '',
+      )
     case 'reverse':
       return new DocumentReverseRule()
     case 'begin':
@@ -1817,7 +1843,12 @@ function toDocumentRule([cmd, pattern, replace, rest, delim]) {
       return new DocumentJoinLinesRule(pattern)
     case 'sl':
     case 'sublines':
-      return new DocumentSubstituteLinesRule(delim, pattern, replace, rest[0] || '')
+      return new DocumentSubstituteLinesRule(
+        delim,
+        pattern,
+        replace,
+        rest[0] || '',
+      )
     case 'exec':
       return new DocumentExecRule()
     case 'help':
@@ -1887,7 +1918,9 @@ function _toLineRangeTest(pattern, job) {
       '%$frequency-$offset (every Nth line minus offset)',
       '$range1, $range2 [, $range3] (multiple ranges)',
     ]
-    throw new ArgError('Invalid line range pattern, expected:' + allowed.join('\n - '))
+    throw new ArgError(
+      'Invalid line range pattern, expected:' + allowed.join('\n - '),
+    )
   }
 
   if (!pattern || pattern === '*') {
@@ -2218,7 +2251,7 @@ function main(args, options = {}) {
 
   if (options.inputFrom === 'file') {
     const file = options.input
-    let diff = `ssed ${args.map(escapeShell).join(' ')}`
+    let diff = `ssed`
     if (options.write && !options.writeToFile && file !== process.stdin) {
       options.writeToFile = file
       diff = file
@@ -2252,14 +2285,7 @@ function main(args, options = {}) {
 
   return inputStream
     .on('line', line => {
-      lastLine = eachLine(
-        onlyRule,
-        line,
-        originalLines,
-        finalLines,
-        state,
-        options,
-      )
+      eachLine(onlyRule, line, originalLines, finalLines, state, options)
     })
     .on('end', (keepOpen, close) => {
       finalize(onlyRule, originalLines, finalLines, state, options)
@@ -2297,7 +2323,10 @@ function main(args, options = {}) {
               }
 
               options.print(
-                yellow(`Write changes to ${options.writeToFile}? [Yn] `, options.color),
+                yellow(
+                  `Write changes to ${options.writeToFile}? [Yn] `,
+                  options.color,
+                ),
                 false,
               )
               keepOpen()
@@ -2327,7 +2356,9 @@ function main(args, options = {}) {
               })
             } else {
               if (options.dryRun) {
-                options.error(yellow(`Dry Run: ${options.writeToFile}`, options.color))
+                options.error(
+                  yellow(`Dry Run: ${options.writeToFile}`, options.color),
+                )
               } else {
                 writeLinesToFile(finalLines, options.writeToFile)
               }
@@ -2386,7 +2417,8 @@ function processRules(rulesIter) {
         lineRules = []
       }
 
-      documentRule = prevCondRule?.reduceDocumentRule(documentRule) ?? documentRule
+      documentRule =
+        prevCondRule?.reduceDocumentRule(documentRule) ?? documentRule
     }
 
     if (lineRule) {
@@ -2945,7 +2977,7 @@ function renderDiff(linesDiff, options) {
 }
 
 function indent(line) {
-  return '  ' + line.replaceAll("\n", "\n  ")
+  return '  ' + line.replaceAll('\n', '\n  ')
 }
 
 if (!Array.prototype.toSorted) {
