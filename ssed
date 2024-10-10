@@ -2207,6 +2207,10 @@ function main(args, options = {}) {
     }
   }
 
+  run(rules, options)
+}
+
+function run(rules, options) {
   const rulesIter = (function* () {
     for (let index = 0; index < rules.length; index++) {
       yield rules[index]
@@ -2223,25 +2227,44 @@ function main(args, options = {}) {
   // inputFrom: 'file' => input: list of files (`ssed --input=file1,file2`)
   // inputFrom: 'ls' => read filenames from stdin (`ssed --input` - or `ssed --ls`)
   if (options.inputFrom === 'ls' || options.inputFrom === 'files') {
-    function next(file) {
-      main(rules, {
+    const files = []
+
+    function next() {
+      const file = files.pop()
+      if (file == null) {
+        return
+      }
+
+      run(rules, {
         ...options,
         inputFrom: 'file',
         input: file,
-      }).on('open', () => {
-        if (!options.diff) {
-          options.print(yellow(`ssed: ${file}`))
-        }
       })
+        .on('open', () => {
+          if (!options.diff) {
+            options.print(yellow(`ssed: ${file}`))
+          }
+        })
+        .on('end', () => {
+          next()
+        })
     }
 
     if (options.inputFrom === 'ls') {
       const stdin = lineStream(process.stdin)
       // treat stdin as list of files
 
-      stdin.on('line', file => {
-        next(file)
-      })
+      stdin
+        .on('line', file => {
+          if (file === '') {
+            return
+          }
+
+          files.push(file)
+        })
+        .on('end', () => {
+          next()
+        })
     } else {
       options.input.forEach(next)
     }
