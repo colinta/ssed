@@ -266,6 +266,41 @@ class IfConditionRule extends ConditionalRule {
   }
 }
 
+class BetweenConditionRule extends ConditionalRule {
+  constructor(delim, startPattern, stopPattern, flags) {
+    super(delim, '', '', [])
+
+    let checkStart, checkStop
+    if (delim === ':') {
+      checkStart = toLineRangeTest(startPattern)
+      checkStop = toLineRangeTest(stopPattern)
+    } else if (delim === '`') {
+      checkStart = line => line.includes(startPattern)
+      checkStop = line => line.includes(stopPattern)
+    } else {
+      const startRegex = new RegExp(startPattern, flags)
+      const stopRegex = new RegExp(stopPattern, flags)
+      checkStart = line => line.match(startRegex)
+      checkStop = line => line.match(stopRegex)
+    }
+
+    this.check = (line, lineNo, state) => {
+      if (!state.conditionOn && checkStart(line, lineNo)) {
+        state.conditionOn = true
+      } else if (state.conditionOn && checkStop(line, lineNo)) {
+        state.conditionOn = false
+        return true
+      }
+
+      return state.conditionOn
+    }
+  }
+
+  explain(_rules) {
+    return `if ${explainPattern(this.delim, this.pattern, 'pattern')} matches`
+  }
+}
+
 class ConditionalAndRule extends ConditionalRule {
   prevRule
 
@@ -406,6 +441,8 @@ function toCondRule([cmd, pattern, replace, rest, delim]) {
   switch (cmd) {
     case 'if':
       return new IfConditionRule(delim, pattern, replace || '')
+    case 'between':
+      return new BetweenConditionRule(delim, pattern, replace || '')
   }
 }
 
