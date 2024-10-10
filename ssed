@@ -2322,14 +2322,15 @@ function run(rules, options) {
           if (fs.existsSync(file)) {
             inputLines = fs.readFileSync(file, 'utf-8').split('\n')
           } else {
-            inputLines = []
+            inputLines = null
           }
         }
-        const linesDiff = diff(inputLines, finalLines)
 
-        const hasDiff = !(
-          linesDiff.length === 1 && linesDiff[0].type === 'same'
-        )
+        const linesDiff = inputLines ? diff(inputLines, finalLines) : []
+
+        const hasDiff =
+          linesDiff.length &&
+          !(linesDiff.length === 1 && linesDiff[0].type === 'same')
         if (hasDiff) {
           renderDiff(linesDiff, options)
 
