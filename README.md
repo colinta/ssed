@@ -99,8 +99,8 @@ on/off state.
     toggle/$pattern                 Turn printing off at the matching line, then off, then on...
 
     p/$pattern (aka print/…)        Only print lines that match 'pattern'
-    k/$pattern (aka kill/…)         Do not print lines that match 'pattern'
-    !p/$pattern (aka !print/…)      Alias for k/kill because I can't remember one (k) and always remember the other (p)
+    d/$pattern (aka del/…)          Do not print lines that match 'pattern'
+    !p/$pattern (aka !print/…)      Alias for d/del because I can't remember one (d) and always remember the other (p)
 
     prepend/$text (aka prefix/…)
     append/$text (aka suffix/…)     Adds text to the beginning (prepend) or end (append) of the line
