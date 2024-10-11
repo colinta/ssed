@@ -144,7 +144,8 @@ class OnlyLineRules extends OnlyRule {
         mappedLines = mappedLines.flatMap(line => {
           let nextLines = lineRule.run(line, state.lineNumber, state)
           if (nextLines == null) {
-            return []
+            // ensure that run() is always called once
+            return [null]
           }
 
           if (Array.isArray(nextLines)) {
@@ -154,6 +155,8 @@ class OnlyLineRules extends OnlyRule {
           return nextLines.split('\n')
         })
       }
+
+      mappedLines = mappedLines.filter(line => line != null)
 
       for (const lineRule of this._rules) {
         mappedLines.forEach(line => {
@@ -1158,9 +1161,7 @@ class ControlPrintingRule extends LineRule {
     }
   }
 
-  beforeEach(line, state) {
-    state.suppressedLine = null
-
+  before(state) {
     if (state.printOn == null) {
       if (this.cmd === 'on' || this.cmd === 'after') {
         state.printOn = false
@@ -1168,6 +1169,10 @@ class ControlPrintingRule extends LineRule {
         state.printOn = true
       }
     }
+  }
+
+  beforeEach(line, state) {
+    state.suppressedLine = null
   }
 
   run(line, lineNo, state) {
@@ -2360,7 +2365,8 @@ function run(rules, options) {
           next()
         })
     } else {
-      options.input.forEach(next)
+      files.push(...options.input)
+      next()
     }
 
     return
