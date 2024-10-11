@@ -431,7 +431,10 @@ class ConditionalDocumentRule extends DocumentRule {
         buffer.push(line)
       } else {
         if (didMatch && buffer.length) {
-          const processedLines = this.documentRule.processDocument(buffer, options)
+          const processedLines = this.documentRule.processDocument(
+            buffer,
+            options,
+          )
           returnLines.push(...processedLines)
           buffer = []
         }
@@ -1471,6 +1474,12 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
       const print = new PrintLineRule(delim, pattern, rest[0] || '')
       return new CombineRules(print, remove)
     }
+    case 'kill':
+    case 'k':
+      console.warn(
+        'The "kill" command is deprecated. Use "del" or "d" instead.',
+      )
+      return new DeleteLineRule(delim, pattern, replace || '')
     case 'del':
     case 'd':
     case '!p':
