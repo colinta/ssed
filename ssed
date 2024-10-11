@@ -255,7 +255,7 @@ class IfConditionRule extends ConditionalRule {
     }
   }
 
-  explain(_rules) {
+  explain() {
     return `if ${explainPattern(this.delim, this.pattern, 'pattern')} matches`
   }
 }
@@ -290,7 +290,7 @@ class BetweenConditionRule extends ConditionalRule {
     }
   }
 
-  explain(_rules) {
+  explain() {
     return `starting at lines matching ${explainPattern(
       this.delim,
       this.pattern,
@@ -541,7 +541,7 @@ class SubstitutionRule extends LineRule {
     }
   }
 
-  explain(_rules) {
+  explain() {
     return `Replace ${explainPattern(
       this.delim,
       this.pattern,
@@ -609,7 +609,7 @@ class GlobalSubstitutionRule extends LineRule {
     }
   }
 
-  explain(_rules) {
+  explain() {
     return `Replace all matches of ${explainPattern(
       this.delim,
       this.pattern,
@@ -664,7 +664,7 @@ class TakeRule extends LineRule {
     }
   }
 
-  explain(_rules) {
+  explain() {
     return `If the line matches ${explainPattern(
       this.delim,
       this.pattern,
@@ -706,7 +706,7 @@ class RemoveRule extends LineRule {
     }
   }
 
-  explain(_rules) {
+  explain() {
     return `Remove ${explainPattern(
       this.delim,
       this.pattern,
@@ -741,7 +741,7 @@ class RemoveRule extends LineRule {
  *     text | print:2-3 => is
  *                         text
  */
-class PrintRule extends LineRule {
+class PrintLineRule extends LineRule {
   check
 
   constructor(delim, pattern, flags) {
@@ -762,7 +762,7 @@ class PrintRule extends LineRule {
     return this.check(line, lineNo) ? line : undefined
   }
 
-  explain(_rules) {
+  explain() {
     return `Print ${explainPattern(this.delim, this.pattern, 'matching-lines')}`
   }
 }
@@ -771,11 +771,11 @@ class PrintRule extends LineRule {
  * Removes lines that match the pattern. Inverse of "print".
  *
  * Usage:
- *    ssed kill/{pattern}
- *    ssed kill:{line-number}
+ *    ssed del/{pattern}
+ *    ssed del:{line-number}
  *
  * Aliases:
- *    ssed k/{pattern}
+ *    ssed d/{pattern}
  *    ssed !p/{pattern}
  *    ssed !print/{pattern}
  *
@@ -785,16 +785,16 @@ class PrintRule extends LineRule {
  *     this
  *     is
  *     some
- *     text | k/is => some
+ *     text | d/is => some
  *                    text
  *
  * @example Using line numbers
  *     this
  *     is
- *     text | kill:1 => is
+ *     text | del:1 => is
  *                      text
  */
-class KillRule extends LineRule {
+class DeleteLineRule extends LineRule {
   check
 
   constructor(delim, pattern, flags) {
@@ -816,7 +816,7 @@ class KillRule extends LineRule {
     return this.check(line, lineNo) ? undefined : line
   }
 
-  explain(_rules) {
+  explain() {
     if (!this.pattern && this.delim !== ':') {
       return 'Remove all lines'
     }
@@ -896,7 +896,7 @@ class UniqueRule extends LineRule {
     }
   }
 
-  explain(_rules) {
+  explain() {
     if (this.pattern) {
       return `Only print lines that match ${explainPattern(
         this.delim,
@@ -957,7 +957,7 @@ class TrimRule extends LineRule {
     this.line = line => this.trim(line)
   }
 
-  explain(_rules) {
+  explain() {
     switch (this.pattern) {
       case 'left':
         return 'Trim whitespace from the left side of the line'
@@ -998,7 +998,7 @@ class SurroundRule extends LineRule {
     return this.prepend + line + this.append
   }
 
-  explain(_rules) {
+  explain() {
     return `Surround each line with '${this.prepend}' and '${this.append}'`
   }
 }
@@ -1026,7 +1026,7 @@ class PrependRule extends SurroundRule {
     super(delim, prependText, '')
   }
 
-  explain(_rules) {
+  explain() {
     return `Prepend each line with '${this.prepend}'`
   }
 }
@@ -1054,7 +1054,7 @@ class AppendRule extends SurroundRule {
     super(delim, '', appendText)
   }
 
-  explain(_rules) {
+  explain() {
     return `Append each line with '${this.append}'`
   }
 }
@@ -1100,7 +1100,7 @@ class InsertRule extends LineRule {
     return line
   }
 
-  explain(_rules) {
+  explain() {
     return `After ${explainPattern(
       this.delim,
       this.pattern,
@@ -1306,7 +1306,7 @@ class GroupMatchRule extends LineRule {
     }
   }
 
-  explain(_rules) {
+  explain() {
     if (!this.pattern) {
       return `Print column #${this.index}, columns are separated by whitespace`
     }
@@ -1376,7 +1376,7 @@ class ColumnsRule extends LineRule {
     }
   }
 
-  explain(_rules) {
+  explain() {
     let explanation = ''
     if (this.pattern) {
       explanation = `Split each line into columns using ${explainPattern(
@@ -1456,26 +1456,26 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
       return new RemoveRule(delim, pattern, rest[0] || '')
     case 'print':
     case 'p':
-      return new PrintRule(delim, pattern, rest[0] || '')
+      return new PrintLineRule(delim, pattern, rest[0] || '')
     case 'takeprint':
     case 'pt':
     case 'tp': {
       const take = new TakeRule(delim, pattern, rest[0] || '')
-      const print = new PrintRule(delim, pattern, rest[0] || '')
+      const print = new PrintLineRule(delim, pattern, rest[0] || '')
       return new CombineRules(print, take)
     }
     case 'rmprint':
     case 'pr':
     case 'rp': {
       const remove = new RemoveRule(delim, pattern, rest[0] || '')
-      const print = new PrintRule(delim, pattern, rest[0] || '')
+      const print = new PrintLineRule(delim, pattern, rest[0] || '')
       return new CombineRules(print, remove)
     }
-    case 'kill':
-    case 'k':
+    case 'del':
+    case 'd':
     case '!p':
     case '!print':
-      return new KillRule(delim, pattern, replace || '')
+      return new DeleteLineRule(delim, pattern, replace || '')
     case 'uniq':
     case 'unique':
       return new UniqueRule(delim, pattern, replace || '')
@@ -1540,7 +1540,7 @@ class DocumentSortRule extends DocumentRule {
         })
   }
 
-  explain(_rules) {
+  explain() {
     const leading = `Sort lines in${
       this.ascending ? '' : ' reverse'
     } alphabetical order`
@@ -1604,7 +1604,7 @@ class DocumentSortNumericRule extends DocumentRule {
         })
   }
 
-  explain(_rules) {
+  explain() {
     const leading = `Sort lines in${
       this.ascending ? '' : ' reverse'
     } numeric order`
@@ -1635,7 +1635,7 @@ class DocumentReverseRule extends DocumentRule {
     return documentLines.toReversed()
   }
 
-  explain(_rules) {
+  explain() {
     return 'Reverse the order of all lines'
   }
 }
@@ -1675,7 +1675,7 @@ class DocumentLineNumbersRule extends DocumentRule {
     })
   }
 
-  explain(_rules) {
+  explain() {
     let leading = `Add line numbers to each line`
     if (this.pattern !== ':') {
       leading += ` with '${this.pattern ?? ':'}' as separator`
@@ -1750,7 +1750,7 @@ class DocumentSubstituteLinesRule extends DocumentRule {
     }
   }
 
-  explain(_rules) {
+  explain() {
     return `Substitute lines matching pattern '${explainPattern(
       this.delim,
       this.pattern,
@@ -1782,7 +1782,7 @@ class DocumentExecRule extends DocumentRule {
     return []
   }
 
-  explain(_rules) {
+  explain() {
     return 'Execute entire document as a shell script and replace with the command output'
   }
 }
@@ -1807,7 +1807,7 @@ class DocumentSurroundRule extends DocumentRule {
     return null
   }
 
-  explain(_rules) {
+  explain() {
     let explanation = ''
     if (this.prependLines.length) {
       explanation += `Prepend document with '''\n${this.prependLines.join(
@@ -1825,7 +1825,7 @@ class DocumentSurroundRule extends DocumentRule {
       explanation += `document with '''\n${this.appendLines.join('\\n')}\n'''`
     }
 
-    return explanation || 'No changes made to the document'
+    return explanation
   }
 }
 
@@ -1845,7 +1845,7 @@ class DocumentJoinLinesRule extends DocumentRule {
     return null
   }
 
-  explain(_rules) {
+  explain() {
     return `Join all lines into a single line using '${this.joiner}' as the separator`
   }
 }
@@ -1863,7 +1863,7 @@ class DocumentCountRule extends DocumentRule {
     return null
   }
 
-  explain(_rules) {
+  explain() {
     return 'Count the number of lines in the document and replace the content with the count'
   }
 }
@@ -2794,8 +2794,8 @@ on/off state.
     toggle/$pattern                 Turn printing off at the matching line, then off, then on...
 
     p/$pattern (aka print/…)        Only print lines that match 'pattern'
-    k/$pattern (aka kill/…)         Do not print lines that match 'pattern'
-    !p/$pattern (aka !print/…)      Alias for k/kill because I can't remember one (k) and always remember the other (p)
+    d/$pattern (aka del/…)          Do not print lines that match 'pattern'
+    !p/$pattern (aka !print/…)      Alias for d/del because I can't remember one (d) and always remember the other (p)
 
     prepend/$text (aka prefix/…)
     append/$text (aka suffix/…)     Adds text to the beginning (prepend) or end (append) of the line
