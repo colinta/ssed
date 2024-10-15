@@ -37,23 +37,26 @@ class Rule {
   }
 
   /**
-   * ConditionalRule returns a ConditionalRule
+   * Called on a ConditionalRule to return a rule that performs an additional check.
    */
-  reduceConditionRule(rule) {
+  addCondition(rule) {
     return rule
   }
 
   /**
-   * ConditionalRule returns a ConditionalLineRule
+   * Returns a rule that applies the condition on every line
    */
-  reduceLineRule(rule) {
-    return rule
+  toConditionalLineRule(lineRule) {
+    return lineRule
   }
 
   /**
-   * ConditionalRule returns a ConditionalDocumentRule
+   * Returns a rule that applies the condition to the entire document.
+   *
+   * This has two behaviours, depending on the condition type. Most conditions
+   * operate on each line, in which case
    */
-  reduceDocumentRule(rule) {
+  toConditionalDocumentRule(rule) {
     return rule
   }
 
@@ -119,6 +122,10 @@ class OnlyRule extends Rule {
 }
 
 class OnlyDocumentRules extends OnlyRule {
+  run(linesWithNumbers, state, options) {
+    return this.processDocument(linesWithNumbers, options)
+  }
+
   processDocument(linesWithNumbers, options) {
     let lines = []
     for (const documentRule of this._rules) {
@@ -132,6 +139,14 @@ class OnlyDocumentRules extends OnlyRule {
 }
 
 class OnlyLineRules extends OnlyRule {
+  run(lines, state, options) {
+    if (!lines) {
+      return null
+    }
+
+    return this.processLines(lines, state, options)
+  }
+
   processLines(lines, state, options) {
     return lines.flatMap(line => {
       state.lineNumber += 1
@@ -228,35 +243,53 @@ class DocumentRule extends Rule {
 }
 
 class ConditionalRule extends Rule {
-  reduceConditionRule(rule) {
+  constructor(isNegated, delim, pattern, replace, check) {
+    super(delim, pattern, replace)
+
+    if (isNegated) {
+      this.check = (line, lineNo, state) => !check(line, lineNo, state)
+    } else {
+      this.check = check
+    }
+  }
+
+  checkDocumentLines(documentLines, state, options) {
+    for (const [line, lineNo] of documentLines) {
+      const didMatch = this.condRule.check(line, lineNo, state)
+      if (didMatch) {
+        return true
+      }
+    }
+
+    return false
+  }
+
+  addCondition(rule) {
     return new ConditionalAndRule(this, rule)
   }
 
-  reduceLineRule(rule) {
+  toConditionalLineRule(rule) {
     return new ConditionalLineRule(this, rule)
   }
 
-  reduceDocumentRule(rule) {
-    return new ConditionalDocumentRule(this, rule)
-  }
-
-  check(line, lineNo, state) {
-    throw Error('Not implemented')
+  toConditionalDocumentRule(rule) {
+    return new LimitedDocumentRule(this, rule)
   }
 }
 
 class IfConditionRule extends ConditionalRule {
-  constructor(delim, pattern, flags) {
-    super(delim, pattern, '', [])
-
+  constructor(isNegated, delim, pattern, flags) {
+    let check
     if (delim === ':') {
-      this.check = toLineRangeTest(pattern)
+      check = toLineRangeTest(pattern)
     } else if (delim === '`') {
-      this.check = line => line.includes(pattern)
+      check = line => line.includes(pattern)
     } else {
       const regex = new RegExp(pattern, flags)
-      this.check = line => line.match(regex)
+      check = line => line.match(regex)
     }
+
+    super(isNegated, delim, pattern, '', check)
   }
 
   explain() {
@@ -264,10 +297,51 @@ class IfConditionRule extends ConditionalRule {
   }
 }
 
-class BetweenConditionRule extends ConditionalRule {
-  constructor(delim, startPattern, stopPattern, flags) {
-    super(delim, startPattern, stopPattern, [])
+class IfAnyDocumentConditionRule extends IfConditionRule {
+  isNegated
 
+  constructor(isNegated, delim, pattern, flags) {
+    super(false, delim, pattern, flags)
+    this.isNegated = isNegated
+  }
+
+  checkDocumentLines(documentLines, state, options) {
+    for (const [line, lineNo] of documentLines) {
+      const didMatch = this.check(line, lineNo, state)
+      if (didMatch) {
+        return this.isNegated ? false : true
+      }
+    }
+
+    return this.isNegated ? true : false
+  }
+
+  toConditionalLineRule(rule) {
+    let documentRule
+    if (rule instanceof OnlyLineRules) {
+      documentRule = new DocumentLineRules(rule._rules)
+    } else {
+      documentRule = new DocumentLineRules([rule])
+    }
+
+    return new ConditionalDocumentRule(this, documentRule)
+  }
+
+  toConditionalDocumentRule(documentRule) {
+    return new ConditionalDocumentRule(this, documentRule)
+  }
+
+  explain() {
+    return `if the document matches ${explainPattern(
+      this.delim,
+      this.pattern,
+      'pattern',
+    )}`
+  }
+}
+
+class BetweenConditionRule extends ConditionalRule {
+  constructor(isNegated, delim, startPattern, stopPattern, flags) {
     let checkStart, checkStop
     if (delim === ':') {
       checkStart = toLineRangeTest(startPattern)
@@ -282,7 +356,7 @@ class BetweenConditionRule extends ConditionalRule {
       checkStop = line => line.match(stopRegex)
     }
 
-    this.check = (line, lineNo, state) => {
+    const check = (line, lineNo, state) => {
       if (!state.conditionOn && checkStart(line, lineNo)) {
         state.conditionOn = true
       } else if (state.conditionOn && checkStop(line, lineNo)) {
@@ -292,16 +366,20 @@ class BetweenConditionRule extends ConditionalRule {
 
       return state.conditionOn
     }
+
+    super(isNegated, delim, startPattern, stopPattern, check)
   }
 
   explain() {
+    const startPattern = this.pattern
+    const stopPattern = this.replace
     return `starting at lines matching ${explainPattern(
       this.delim,
-      this.pattern,
+      startPattern,
       'pattern',
     )} and stopping at lines matching ${explainPattern(
       this.delim,
-      this.replace,
+      stopPattern,
       'pattern',
     )}`
   }
@@ -311,7 +389,16 @@ class ConditionalAndRule extends ConditionalRule {
   prevRule
 
   constructor(prevRule, nextRule) {
-    super('', '', '', [])
+    super(
+      false,
+      '',
+      '',
+      '',
+      [],
+      (line, lineNo, state) =>
+        prevRule.check(line, lineNo, state) &&
+        nextRule.check(line, lineNo, state),
+    )
 
     this.prevRule = prevRule
     this.nextRule = nextRule
@@ -321,14 +408,7 @@ class ConditionalAndRule extends ConditionalRule {
     return [this.prevRule, this.nextRule].flatMap(rule => rule.rules())
   }
 
-  check(line, lineNo, state) {
-    return (
-      this.prevRule.check(line, lineNo, state) &&
-      this.nextRule.check(line, lineNo, state)
-    )
-  }
-
-  reduceConditionRule(rule) {
+  addCondition(rule) {
     return new ConditionalAndRule(this, rule)
   }
 
@@ -398,7 +478,16 @@ class ConditionalLineRule extends LineRule {
   }
 }
 
-class ConditionalDocumentRule extends DocumentRule {
+/**
+ * Runs `documentRule` only against lines that match `condRule`.
+ *
+ * Lines are grouped into subsequent "blocks". IE if the first 5 lines and last 5
+ * lines of a 15 line document match the rule, `documentRule` will be run twice.
+ * Once on the first 5 lines, then the middle 5 lines will be added "as-is", and
+ * then the last 5 lines will be processed by `documentRule` as if they were a
+ * separate document.
+ */
+class LimitedDocumentRule extends DocumentRule {
   documentRule
 
   constructor(condRule, documentRule) {
@@ -467,6 +556,59 @@ class ConditionalDocumentRule extends DocumentRule {
   }
 
   explain(rules) {
+    return `On any lines that match:\n${indent(
+      this.condRule.explain(rules),
+    )}, apply the rule:\n${indent(this.documentRule.explain(rules))}`
+  }
+}
+
+/**
+ * Runs `documentRule` only if `condRule` passes. The condition is run against
+ * the entire document, so usually this means that `documentRule` is run if *any*
+ * line passes the `condRule`.
+ */
+class ConditionalDocumentRule extends DocumentRule {
+  documentRule
+
+  constructor(condRule, documentRule) {
+    super('', '', '', [])
+
+    this.condRule = condRule
+    this.documentRule = documentRule
+  }
+
+  rules() {
+    return [this.condRule, this.documentRule].flatMap(rule => rule.rules())
+  }
+
+  before(state, options) {
+    this.condRule.before(state, options)
+    this.documentRule.before(state, options)
+  }
+
+  run(documentLines, state, options) {
+    if (documentLines == null) {
+      return
+    }
+
+    let didMatch = this.condRule.checkDocumentLines(documentLines, state, options)
+    if (didMatch) {
+      return this.documentRule.run(documentLines, state, options)
+    }
+
+    return documentLines.map(([line]) => line)
+  }
+
+  after(state, options) {
+    this.condRule.after(state, options)
+    this.documentRule.after(state, options)
+  }
+
+  blankLastLine() {
+    return this.documentRule.blankLastLine()
+  }
+
+  explain(rules) {
     return `Only apply the following rule ${this.condRule.explain(
       rules,
     )}:\n${indent(this.documentRule.explain(rules))}`
@@ -475,10 +617,31 @@ class ConditionalDocumentRule extends DocumentRule {
 
 function toCondRule([cmd, pattern, replace, rest, delim]) {
   switch (cmd) {
+    case '!if':
     case 'if':
-      return new IfConditionRule(delim, pattern, replace || '')
+      return new IfConditionRule(
+        cmd.startsWith('!'), // isNegated
+        delim,
+        pattern,
+        replace || '', // flags
+      )
+    case '!between':
     case 'between':
-      return new BetweenConditionRule(delim, pattern, replace || '')
+      return new BetweenConditionRule(
+        cmd.startsWith('!'),
+        delim,
+        pattern,
+        replace || '',
+      )
+    case '!ifany':
+    case 'ifany':
+    case 'ifnone':
+      return new IfAnyDocumentConditionRule(
+        cmd === '!ifany' || cmd === 'ifnone',
+        delim,
+        pattern,
+        replace || '',
+      )
   }
 }
 
@@ -2521,7 +2684,7 @@ function processRules(rulesIter) {
 
       if ((condRule = toCondRule(parsed))) {
         if (prevCondRule) {
-          prevCondRule = prevCondRule.reduceConditionRule(condRule)
+          prevCondRule = prevCondRule.addCondition(condRule)
         } else {
           prevCondRule = condRule
         }
@@ -2541,9 +2704,9 @@ function processRules(rulesIter) {
       // reduce*Rule will return either ConditionalLineRule or ConditionalDocumentRule
       let nextRule
       if (lineRule) {
-        nextRule = prevCondRule.reduceLineRule(lineRule)
+        nextRule = prevCondRule.toConditionalLineRule(lineRule)
       } else {
-        nextRule = prevCondRule.reduceDocumentRule(documentRule)
+        nextRule = prevCondRule.toConditionalDocumentRule(documentRule)
       }
 
       if (nextRule instanceof ConditionalLineRule) {
@@ -2552,13 +2715,6 @@ function processRules(rulesIter) {
       } else {
         lineRule = null
         documentRule = nextRule
-      }
-    } else {
-      if (lineRule) {
-        lineRule = prevCondRule?.reduceLineRule(lineRule) ?? lineRule
-      } else if (documentRule) {
-        documentRule =
-          prevCondRule?.reduceDocumentRule(documentRule) ?? documentRule
       }
     }
 
@@ -2630,7 +2786,10 @@ function finalize(onlyRule, originalLines, finalLines, state, options) {
     state.lineNumber += 1
   }
 
-  const finalLinesWithNumbers = finalLines.map((line, index) => [line, index + 1])
+  const finalLinesWithNumbers = finalLines.map((line, index) => [
+    line,
+    index + 1,
+  ])
   const nextLines = onlyRule.processDocument(finalLinesWithNumbers, options)
 
   if (isLastLineBlank) {
