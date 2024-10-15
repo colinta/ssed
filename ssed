@@ -104,8 +104,8 @@ class OnlyRule extends Rule {
     return lines
   }
 
-  processDocument(lines, options) {
-    return lines
+  processDocument(linesWithNumbers, options) {
+    return linesWithNumbers.map(([line]) => line)
   }
 
   after(state, options) {
@@ -119,11 +119,12 @@ class OnlyRule extends Rule {
 }
 
 class OnlyDocumentRules extends OnlyRule {
-  processDocument(lines, options) {
+  processDocument(linesWithNumbers, options) {
+    let lines = []
     for (const documentRule of this._rules) {
       const state = resetState()
-      const linesWithNumbers = lines.map((line, index) => [line, index + 1])
       lines = documentRule.run(linesWithNumbers, state, options) ?? []
+      linesWithNumbers = lines.map((line, index) => [line, index + 1])
     }
 
     return lines
@@ -431,7 +432,7 @@ class ConditionalDocumentRule extends DocumentRule {
           buffer = []
         }
         didMatch = true
-        buffer.push(line)
+        buffer.push([line, lineNo])
       } else {
         if (didMatch && buffer.length) {
           const processedLines = this.documentRule.processDocument(
@@ -2411,7 +2412,7 @@ function run(rules, options) {
       eachLine(onlyRule, line, originalLines, finalLines, state, options)
     })
     .on('end', (keepOpen, close) => {
-      finalize(onlyRule, originalLines, finalLines, state, options)
+      finalLines = finalize(onlyRule, originalLines, finalLines, state, options)
 
       onlyRule.after(state, options)
 
@@ -2534,25 +2535,49 @@ function processRules(rulesIter) {
       }
     }
 
+    if (prevCondRule) {
+      // convert the line/document rule using prevCondRule.reduce*Rule,
+      // then assign the returned rule into a line or document rule
+      // reduce*Rule will return either ConditionalLineRule or ConditionalDocumentRule
+      let nextRule
+      if (lineRule) {
+        nextRule = prevCondRule.reduceLineRule(lineRule)
+      } else {
+        nextRule = prevCondRule.reduceDocumentRule(documentRule)
+      }
+
+      if (nextRule instanceof ConditionalLineRule) {
+        lineRule = nextRule
+        documentRule = null
+      } else {
+        lineRule = null
+        documentRule = nextRule
+      }
+    } else {
+      if (lineRule) {
+        lineRule = prevCondRule?.reduceLineRule(lineRule) ?? lineRule
+      } else if (documentRule) {
+        documentRule =
+          prevCondRule?.reduceDocumentRule(documentRule) ?? documentRule
+      }
+    }
+
     if (lineRule) {
-      lineRule = prevCondRule?.reduceLineRule(lineRule) ?? lineRule
+      lineRules.push(lineRule)
     } else if (documentRule) {
       if (lineRules.length) {
         documentRules.push(new DocumentLineRules(lineRules))
         lineRules = []
       }
 
-      documentRule =
-        prevCondRule?.reduceDocumentRule(documentRule) ?? documentRule
-    }
-
-    if (lineRule) {
-      lineRules.push(lineRule)
-    } else if (documentRule) {
       documentRules.push(documentRule)
     }
 
     prevCondRule = null
+  }
+
+  if (prevCondRule) {
+    throw new ArgError(`Unmatched conditional rule`)
   }
 
   if (lineRules.length && documentRules.length) {
@@ -2605,17 +2630,17 @@ function finalize(onlyRule, originalLines, finalLines, state, options) {
     state.lineNumber += 1
   }
 
-  const nextLines = onlyRule.processDocument(finalLines, options)
-  if (nextLines !== finalLines) {
-    finalLines.splice(0, finalLines.length, ...nextLines)
-  }
+  const finalLinesWithNumbers = finalLines.map((line, index) => [line, index + 1])
+  const nextLines = onlyRule.processDocument(finalLinesWithNumbers, options)
 
   if (isLastLineBlank) {
     const lastLine = onlyRule.blankLastLine()
     if (lastLine != null) {
-      finalLines.push('')
+      nextLines.push('')
     }
   }
+
+  return nextLines
 }
 
 function delimiterTestFn(delim) {
