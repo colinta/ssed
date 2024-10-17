@@ -753,16 +753,17 @@ class GlobalSubstitutionRule extends LineRule {
       if (flags && flags.includes('i')) {
         this.line = line => {
           let index = 0
-          const parts = []
+          let buffer = ''
+          let remainder = line
           while (~index) {
-            index = line.toLowerCase().indexOf(pattern.toLowerCase())
+            index = remainder.toLowerCase().indexOf(pattern.toLowerCase())
             if (~index) {
-              parts.push(line.slice(0, index))
-              line = line.slice(index + pattern.length)
+              buffer += remainder.slice(0, index) + replace
+              remainder = remainder.slice(index + pattern.length)
             }
           }
 
-          return parts.join(replace) + line
+          return buffer + remainder
         }
       } else {
         this.line = line => line.replaceAll(pattern, replace)
