@@ -790,6 +790,64 @@ class GlobalSubstitutionRule extends LineRule {
 }
 
 /**
+ * Splits a line into multiple lines. Does not support line numbers. Default split is whitespace
+ *
+ * Usage:
+ *     ssed split/{pattern}
+ *     ssed split`{search}
+ *
+ * @example using regex
+ *     this is text | split/' ' => that
+ *                                 is
+ *                                 text
+ */
+class SplitRule extends LineRule {
+  constructor(delim, pattern, flags) {
+    if (delim === ':') {
+      throw new ArgError(`'split' does not support line numbers`)
+    }
+
+    pattern ??= delim === '`' ? ' ' : '\w'
+    super(delim, pattern, '', [])
+
+    if (delim === '`') {
+      if (flags && flags.includes('i')) {
+        this.line = line => {
+          const lines = []
+          let index = 0
+          const parts = []
+          let remainder = line
+          while (~index) {
+            index = remainder.toLowerCase().indexOf(pattern.toLowerCase())
+            if (~index) {
+              lines.push(remainder.slice(0, index))
+              remainder = remainder.slice(index + pattern.length)
+            }
+          }
+
+          lines.push(remainder)
+
+          return lines
+        }
+      } else {
+        this.line = line => line.split(pattern)
+      }
+    } else {
+      const regex = new RegExp(pattern, flags)
+      this.line = line => line.split(regex)
+    }
+  }
+
+  explain() {
+    return `Replace ${explainPattern(
+      this.delim,
+      this.pattern,
+      'pattern',
+    )} with '${this.replace}'`
+  }
+}
+
+/**
  * Only print the matching part of the line, or print the entire line if 'pattern'
  * doesn't match. (hint: Use `takeprint / tp` to only print matching lines)
  *
@@ -1621,6 +1679,8 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
     case 'gsub':
     case 'g':
       return new GlobalSubstitutionRule(delim, pattern, replace, rest[0] || '')
+    case 'split':
+      return new SplitRule(delim, pattern, replace ?? '')
     case 'take':
     case 't':
       return new TakeRule(delim, pattern, rest[0] || '')
@@ -2869,6 +2929,9 @@ function unescape(str) {
     }
     if (char === 't') {
       return '\t'
+    }
+    if (char === '0') {
+      return '\0'
     }
     return `\\${char}`
   })
