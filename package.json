@@ -11,7 +11,7 @@
     "ssed": "./ssed"
   },
   "scripts": {
-    "prepublishOnly": "<ssed ssed 'after/function help' 'off/END HELP' '1/(Usage)/' --write=README.md"
+    "prepublishOnly": "<ssed ssed 'after/START HELP' 'off/END HELP' '1/^\\s*`\\s*(Usage)$/' --write=README.md"
   },
   "repository": {
     "type": "git",

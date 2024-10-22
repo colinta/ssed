@@ -2956,7 +2956,9 @@ function parseRuleArgs(rule) {
 }
 
 function help() {
-  process.stderr.write(`Usage
+  process.stderr.write(
+    // START HELP
+    `Usage
 -----
     > ssed --help
     > something | ssed [commands]
@@ -3121,7 +3123,8 @@ modulo operation (with offset), and a comma-separated list of line rules.
     p:9-                Matches the line number and all subsequent lines (lines 9 and onward)
     p:-9                Matches lines up to and including the line number (lines 1-9)
     p:1-5,10-15,20,30+  Line rules can be mixed and matched
-`) // END HELP
+`, // END HELP
+  )
 }
 
 function resetState() {
