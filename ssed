@@ -591,7 +591,11 @@ class ConditionalDocumentRule extends DocumentRule {
       return
     }
 
-    let didMatch = this.condRule.checkDocumentLines(documentLines, state, options)
+    let didMatch = this.condRule.checkDocumentLines(
+      documentLines,
+      state,
+      options,
+    )
     if (didMatch) {
       return this.documentRule.run(documentLines, state, options)
     }
@@ -807,7 +811,7 @@ class SplitRule extends LineRule {
       throw new ArgError(`'split' does not support line numbers`)
     }
 
-    pattern ??= delim === '`' ? ' ' : '\w'
+    pattern ??= delim === '`' ? ' ' : '\\w'
     super(delim, pattern, '', [])
 
     if (delim === '`') {
