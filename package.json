@@ -1,6 +1,6 @@
 {
   "name": "ssed",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Fed up with trying to remember sed's weird regex support? Me, too.",
   "main": "ssed",
   "directories": {
@@ -10,8 +10,11 @@
   "bin": {
     "ssed": "./ssed"
   },
+  "man": "./ssed.1",
   "scripts": {
-    "prepublishOnly": "<ssed ssed 'after/START HELP' 'off/END HELP' '1/^\\s*`\\s*(Usage)$/' --write=README.md"
+    "prepublishOnly": "yarn generate-readme && yarn generate-manual",
+    "generate-readme": "<ssed ssed 'after/START HELP' 'off/END HELP' '1/^\\s*`\\s*(\\S+.*)$/' --write=README.md",
+    "generate-manual": "if [[ -f ssed.1 ]]; then rm ssed.1 ; fi ; yarn marked-man README.md > ssed.1"
   },
   "repository": {
     "type": "git",
@@ -25,5 +28,8 @@
   "bugs": {
     "url": "https://github.com/colinta/ssed/issues"
   },
-  "homepage": "https://github.com/colinta/ssed#readme"
+  "homepage": "https://github.com/colinta/ssed#readme",
+  "devDependencies": {
+    "marked-man": "^2.1.0"
+  }
 }
