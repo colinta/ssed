@@ -1,5 +1,5 @@
-$ /Users/colinta/src/github.com/colinta/ssed/node_modules/.bin/marked-man README.md
-.TH "SSED" "1" "November 2024" "1.5.0"
+$ /Users/colinta/Code/node.js/ssed/node_modules/.bin/marked-man README.md
+.TH "SSED" "1" "November 2024" "1.6.2"
 .SH "NAME"
 \fBssed\fR \- general purpose stream and file editor
 .SH SYNOPSIS
@@ -101,11 +101,8 @@ Indicates a line\-number rule\. Not all rules support line numbers\. Line number
 `\\``
 .br
 Indicates a literal string match\. From the shell, use this inside single quotes:
-.RS 2
-.nf
-  sed 's\\`foo\\`bar'
-.fi
-.RE
+.P
+ssed 's`foo`bar'
 .IP \(bu 2
 `/`, `|`, `=`, `\-`, `{\.\.}`
 .br

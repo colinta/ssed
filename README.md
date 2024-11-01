@@ -75,7 +75,7 @@ Indicates a line-number rule. Not all rules support line numbers. Line numbers a
 * \`\\\`\`
 Indicates a literal string match. From the shell, use this inside single quotes:
 
-        sed 's\`foo\`bar'
+    ssed 's\`foo\`bar'
 
 * \`/\`, \`|\`, \`=\`, \`-\`, \`{..}\`
 All other separators will use Regex with support for \`i, g\` flags. Matching brackets can also be used.
