@@ -1708,12 +1708,6 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
       const print = new PrintLineRule(delim, pattern, rest[0] || '')
       return new CombineRules(print, remove)
     }
-    case 'kill':
-    case 'k':
-      console.warn(
-        'The "kill" command is deprecated. Use "del" or "d" instead.',
-      )
-      return new DeleteLineRule(delim, pattern, replace || '')
     case 'del':
     case 'd':
     case '!p':
@@ -2203,15 +2197,15 @@ function toDocumentRule([cmd, pattern, replace, rest, delim]) {
       version()
       process.exit(0)
     case 'docsurround':
-      console.error('`' + cmd + '` is deprecated, use `border` instead')
+      console.error('`' + cmd + '` has been removed, use `border` instead')
       process.exit(1)
     case 'docprepend':
     case 'docprefix':
-      console.error('`' + cmd + '` is deprecated, use `begin` instead')
+      console.error('`' + cmd + '` has been removed, use `begin` instead')
       process.exit(1)
     case 'docappend':
     case 'docsuffix':
-      console.error('`' + cmd + '` is deprecated, use `end` instead')
+      console.error('`' + cmd + '` has been removed, use `end` instead')
       process.exit(1)
   }
 }
