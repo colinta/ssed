@@ -2324,13 +2324,7 @@ function _toLineRangeTest(pattern, job) {
         : `lines from ${start} to ${stop}`
     }
 
-    return (_, lineNo) => {
-      if (lineNo < 12) {
-        console.log('=========== ssed at line 2314 ===========');
-        console.log({_, lineNo, start, stop});
-      }
-      return lineNo >= start && lineNo <= stop
-    }
+    return (_, lineNo) => lineNo >= start && lineNo <= stop
   }
 
   if (job === 'explain') {
