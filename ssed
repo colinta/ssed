@@ -1223,8 +1223,8 @@ class SurroundRule extends LineRule {
 
   constructor(delim, prepend, append) {
     super(delim, '', '', []) // pattern and replace are not used in this rule
-    this.prepend = prepend
-    this.append = append
+    this.prepend = prepend ?? ''
+    this.append = append ?? ''
   }
 
   line(line) {
