@@ -1675,6 +1675,21 @@ class CombineRules extends LineRule {
   }
 }
 
+class TapRule extends LineRule {
+  constructor() {
+    super('', '', '', [])
+  }
+
+  line(line, lineNo) {
+    process.stderr.write(line + '\n')
+    return line
+  }
+
+  explain() {
+    return 'Output each line to STDERR'
+  }
+}
+
 function toLineRule([cmd, pattern, replace, rest, delim]) {
   switch (cmd) {
     case 'sub':
@@ -1735,6 +1750,8 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
       return new ControlPrintingRule(cmd, delim, pattern, rest[0] || '')
     case 'cols':
       return new ColumnsRule(delim, pattern, replace, rest)
+    case 'tap':
+      return new TapRule()
     default:
       if (cmd.match(/^\d+$/)) {
         const index = parseInt(cmd)
