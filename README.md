@@ -21,7 +21,7 @@ Line rules transform on a line-by-line basis and, if only line rules are employe
 
 Document rules transform the entire document. STDIN is read to completion before document rules are executed.
 
-Like sed, and symbol can be used to separate the rule arguments, but unlike sed *some* separators change the behaviour of the command. The special separators are ':' and '\`'.
+Like sed, any symbol can be used to separate the rule arguments, but unlike sed *some* separators change the behaviour of the command. The special separators are ':' and '\`'.
 
 OPTIONS
 -------
@@ -147,6 +147,9 @@ Turn printing off at the matching line, then off, then on...
 
 * \`uniq\`, \`unique\`, \`uniq/$pattern\`
 Only print unique lines. Optionanly, uniqueness can be determined by the matching regex. The entire line is still printed.
+
+* \`tap\`
+Prints the *current document* to STDERR. Usefull for debugging, or in conjunction with \`--write\` to verify expected output.
 
 DOCUMENT RULES
 --------------

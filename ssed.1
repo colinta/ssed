@@ -1,4 +1,4 @@
-.TH "SSED" "1" "November 2024" "1.6.3"
+.TH "SSED" "1" "November 2024" "1.6.4"
 .SH "NAME"
 \fBssed\fR \- general purpose stream and file editor
 .SH SYNOPSIS
@@ -25,7 +25,7 @@ Line rules transform on a line\-by\-line basis and, if only line rules are emplo
 .P
 Document rules transform the entire document\. STDIN is read to completion before document rules are executed\.
 .P
-Like sed, and symbol can be used to separate the rule arguments, but unlike sed \fIsome\fR separators change the behaviour of the command\. The special separators are ':' and '`\|'\.
+Like sed, any symbol can be used to separate the rule arguments, but unlike sed \fIsome\fR separators change the behaviour of the command\. The special separators are ':' and '`\|'\.
 .SH OPTIONS
 .P
 Options and rules can be interleved in any order, it won't affect the behaviour (you cannot set options for specific rules)\.
@@ -214,6 +214,10 @@ Turn printing off at the matching line, then off, then on\.\.\.
 `uniq`, `unique`, `uniq/$pattern`
 .br
 Only print unique lines\. Optionanly, uniqueness can be determined by the matching regex\. The entire line is still printed\.
+.IP \(bu 2
+`tap`
+.br
+Prints the \fIcurrent document\fR to STDERR\. Usefull for debugging, or in conjunction with `\-\-write` to verify expected output\.
 
 .RE
 .SH DOCUMENT RULES

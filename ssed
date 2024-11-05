@@ -3181,6 +3181,9 @@ Turn printing off at the matching line, then off, then on...
 * \`uniq\`, \`unique\`, \`uniq/$pattern\`
 Only print unique lines. Optionanly, uniqueness can be determined by the matching regex. The entire line is still printed.
 
+* \`tap\`
+Prints the *current document* to STDERR. Usefull for debugging, or in conjunction with \`--write\` to verify expected output.
+
 DOCUMENT RULES
 --------------
 
