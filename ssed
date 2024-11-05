@@ -2672,6 +2672,14 @@ function run(rules, options) {
 +++ ${diff}`
 
     options.input = fs.createReadStream(file)
+  } else if (
+    options.inputFrom === 'stdin' &&
+    options.write &&
+    !options.writeToFile
+  ) {
+    throw new ArgError(
+      `When reading from stdin, --write must be accompanied with a filename`,
+    )
   }
 
   const inputStream = lineStream(options.input)
@@ -2713,8 +2721,9 @@ function run(rules, options) {
         const linesDiff = inputLines ? diff(inputLines, finalLines) : []
 
         const hasDiff =
-          linesDiff.length &&
-          !(linesDiff.length === 1 && linesDiff[0].type === 'same')
+          linesDiff.length === 0 ||
+          (linesDiff.length &&
+            !(linesDiff.length === 1 && linesDiff[0].type === 'same'))
         if (hasDiff) {
           renderDiff(linesDiff, options)
 
