@@ -81,6 +81,10 @@ class Rule {
   explain(_rules) {
     return ''
   }
+
+  processLines(lines, state, options) {
+    return new OnlyLineRules([this]).processLines(lines, state, options)
+  }
 }
 
 class OnlyRule extends Rule {
@@ -243,8 +247,11 @@ class DocumentRule extends Rule {
 }
 
 class ConditionalRule extends Rule {
+  condRule
+  check
+
   constructor(isNegated, delim, pattern, replace, check) {
-    super(delim, pattern, replace)
+    super(delim, pattern, replace, [])
 
     if (isNegated) {
       this.check = (line, lineNo, state) => !check(line, lineNo, state)
@@ -386,6 +393,7 @@ class BetweenConditionRule extends ConditionalRule {
 }
 
 class ConditionalAndRule extends ConditionalRule {
+  nextRule
   prevRule
 
   constructor(prevRule, nextRule) {
@@ -394,7 +402,6 @@ class ConditionalAndRule extends ConditionalRule {
       '',
       '',
       '',
-      [],
       (line, lineNo, state) =>
         prevRule.check(line, lineNo, state) &&
         nextRule.check(line, lineNo, state),
@@ -2321,7 +2328,12 @@ function _toLineRangeTest(pattern, job) {
   }
 
   if (pattern.includes('-')) {
-    const [start, stop] = pattern.split('-', 2).map((number, index) => {
+    const command = pattern.match(/^(\d+)-(\d+)$/)
+    if (!command) {
+      throw new ArgError(`Invalid line range pattern '${pattern}'. Line numbers must be positive.`)
+    }
+
+    let [start, stop] = pattern.split('-', 2).map((number, index) => {
       if (number === '' && index === 0) {
         return 1
       } else if (number === '' && index === 1) {
@@ -2330,6 +2342,10 @@ function _toLineRangeTest(pattern, job) {
         return Number(number)
       }
     })
+
+    if (start < 0 || stop < 0) {
+      throw new ArgError('Line numbers must be positive')
+    }
 
     if (job === 'explain') {
       return start === 1 && stop === Infinity
@@ -2951,7 +2967,7 @@ function delimiterTestFn(delim) {
   return char => char === delim
 }
 
-function split(str, delim) {
+function delimSplit(str, delim) {
   const test = delimiterTestFn(delim)
   const args = []
   let buffer = ''
@@ -3006,7 +3022,7 @@ function unescape(str) {
 }
 
 function parseRuleArgs(rule) {
-  const command = rule.match(/^(!?\w+\b|\d+)(.)/)
+  const command = rule.match(/^(!?\w+\b)(.)/)
   if (!command) {
     const [simpleCommand] = rule.match(/^!?(\w+\b|\d+)$/) ?? []
     if (!simpleCommand) {
@@ -3017,7 +3033,7 @@ function parseRuleArgs(rule) {
 
   const [cmd, delim] = [command[1], command[2]]
   const argsString = rule.slice(command[0].length)
-  const splitArgs = split(argsString, delim)
+  const splitArgs = delimSplit(argsString, delim)
   const [pattern, replace, ...rest] = splitArgs.map(unescape)
 
   return [cmd.toLowerCase(), pattern, replace, rest, delim]
