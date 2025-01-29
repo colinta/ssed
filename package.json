@@ -30,6 +30,7 @@
   },
   "homepage": "https://github.com/colinta/ssed#readme",
   "devDependencies": {
+    "jest": "^29.7.0",
     "marked-man": "^2.1.0"
   }
 }

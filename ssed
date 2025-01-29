@@ -3,14 +3,6 @@ const fs = require('fs')
 const EventEmitter = require('events')
 const {exec, execSync} = require('child_process')
 
-process.stdout.on('error', function (err) {
-  if (err.code === 'EPIPE') {
-    exec('stty echo', () => {
-      process.exit(0)
-    })
-  }
-})
-
 class ArgError extends Error {}
 
 function requireArg(name, value) {
@@ -111,7 +103,7 @@ class OnlyRule extends Rule {
     return lines
   }
 
-  processDocument(linesWithNumbers, options) {
+  processDocument(linesWithNumbers, state, options) {
     return linesWithNumbers.map(([line]) => line)
   }
 
@@ -127,13 +119,12 @@ class OnlyRule extends Rule {
 
 class OnlyDocumentRules extends OnlyRule {
   run(linesWithNumbers, state, options) {
-    return this.processDocument(linesWithNumbers, options)
+    return this.processDocument(linesWithNumbers, state, options)
   }
 
-  processDocument(linesWithNumbers, options) {
+  processDocument(linesWithNumbers, state, options) {
     let lines = []
     for (const documentRule of this._rules) {
-      const state = resetState()
       lines = documentRule.run(linesWithNumbers, state, options) ?? []
       linesWithNumbers = lines.map((line, index) => [line, index + 1])
     }
@@ -152,6 +143,7 @@ class OnlyLineRules extends OnlyRule {
   }
 
   processLines(lines, state, options) {
+    state.lineNumber = 0
     return lines.flatMap(line => {
       state.lineNumber += 1
 
@@ -235,13 +227,13 @@ class DocumentRule extends Rule {
    * Runs on every rule, even if there are no lines.
    */
   run(documentLines, state, options) {
-    return this.lines(documentLines, options)
+    return this.lines(documentLines, state, options)
   }
 
   /**
    * lines is an array of [line, lineNo]
    */
-  lines(documentLines, options) {
+  lines(documentLines, state, options) {
     return []
   }
 }
@@ -456,9 +448,8 @@ class ConditionalLineRule extends LineRule {
     }
 
     if (this.condRule.check(line, lineNo, state)) {
-      const conditionState = resetState()
-      conditionState.lineNumber = lineNo - 1
-      return this.lineRule.processLines([line], conditionState, options)
+      state.lineNumber = lineNo - 1
+      return this.lineRule.processLines([line], state, options)
     } else {
       return line
     }
@@ -533,6 +524,7 @@ class LimitedDocumentRule extends DocumentRule {
         if (didMatch && buffer.length) {
           const processedLines = this.documentRule.processDocument(
             buffer,
+            state,
             options,
           )
           returnLines.push(...processedLines)
@@ -544,7 +536,7 @@ class LimitedDocumentRule extends DocumentRule {
     }
 
     if (didMatch) {
-      const processedLines = this.documentRule.processDocument(buffer, options)
+      const processedLines = this.documentRule.processDocument(buffer, state, options)
       returnLines.push(...processedLines)
     } else if (!didMatch && buffer.length) {
       returnLines.push(...buffer)
@@ -1380,6 +1372,7 @@ class ControlPrintingRule extends LineRule {
   check
 
   constructor(cmd, delim, pattern, flags) {
+    requireArg('pattern', pattern)
     super(delim, pattern, '', [])
 
     this.cmd = cmd
@@ -2029,7 +2022,7 @@ class DocumentExecRule extends DocumentRule {
     super('', '', '', [])
   }
 
-  lines(documentLines, options) {
+  lines(documentLines, state, options) {
     const input = documentLines.map(([line]) => line).join('\n')
 
     if (options.dryRun) {
@@ -2137,12 +2130,15 @@ class DocumentLineRules extends DocumentRule {
     this.rule = new OnlyLineRules(lineRules)
   }
 
+  before(state) {
+    this.rule.before(state)
+  }
+
   rules() {
     return this.rule._rules.flatMap(rule => rule.rules())
   }
 
-  lines(documentLines, options) {
-    const state = resetState()
+  lines(documentLines, state, options) {
     const inputLines = documentLines.map(([line]) => line)
     return this.rule.processLines(inputLines, state, options)
   }
@@ -2222,15 +2218,15 @@ function toDocumentRule([cmd, pattern, replace, rest, delim]) {
       process.exit(0)
     case 'docsurround':
       console.error('`' + cmd + '` has been removed, use `border` instead')
-      process.exit(1)
+      process.exit(-1)
     case 'docprepend':
     case 'docprefix':
       console.error('`' + cmd + '` has been removed, use `begin` instead')
-      process.exit(1)
+      process.exit(-1)
     case 'docappend':
     case 'docsuffix':
       console.error('`' + cmd + '` has been removed, use `end` instead')
-      process.exit(1)
+      process.exit(-1)
   }
 }
 
@@ -2572,8 +2568,58 @@ function parseOption(options, arg, args) {
   }
 }
 
-function main(args, options = {}) {
+function runFromLsFiles(rules, options) {
+  const emitter = new EventEmitter()
+  const files = []
+
+  function next() {
+    const file = files.pop()
+    if (file == null) {
+      emitter.emit('end')
+      return
+    }
+
+    const stream = run(rules, {
+      ...options,
+      inputFrom: 'file',
+      input: file,
+    })
+
+    stream.on('open', () => {
+      if (!options.diff) {
+        options.print(yellow(`ssed: ${file}`))
+      }
+    })
+
+    stream.on('end', () => {
+      next()
+    })
+  }
+
+  if (options.inputFrom === 'ls') {
+    const stdin = lineStream(process.stdin)
+    // treat stdin as list of files
+    stdin
+      .on('line', file => {
+        if (file === '') {
+          return
+        }
+        files.push(file)
+      })
+      .on('end', () => {
+        next()
+      })
+  } else {
+    files.push(...options.input)
+    next()
+  }
+
+  return emitter
+}
+
+async function main(args, options = {}) {
   options = {
+    debug: false,
     input: process.stdin,
     inputFrom: 'stdin',
     explain: false,
@@ -2606,7 +2652,15 @@ function main(args, options = {}) {
     }
   }
 
-  run(rules, options)
+  return new Promise((resolve, reject) => {
+    try {
+      const stream = run(rules, options)
+      stream.on('end', resolve)
+      stream.on('error', reject)
+    } catch (error) {
+      reject(error)
+    }
+  })
 }
 
 function run(rules, options) {
@@ -2626,50 +2680,7 @@ function run(rules, options) {
   // inputFrom: 'file' => input: list of files (`ssed --input=file1,file2`)
   // inputFrom: 'ls' => read filenames from stdin (`ssed --input` - or `ssed --ls`)
   if (options.inputFrom === 'ls' || options.inputFrom === 'files') {
-    const files = []
-
-    function next() {
-      const file = files.pop()
-      if (file == null) {
-        return
-      }
-
-      run(rules, {
-        ...options,
-        inputFrom: 'file',
-        input: file,
-      })
-        .on('open', () => {
-          if (!options.diff) {
-            options.print(yellow(`ssed: ${file}`))
-          }
-        })
-        .on('end', () => {
-          next()
-        })
-    }
-
-    if (options.inputFrom === 'ls') {
-      const stdin = lineStream(process.stdin)
-      // treat stdin as list of files
-
-      stdin
-        .on('line', file => {
-          if (file === '') {
-            return
-          }
-
-          files.push(file)
-        })
-        .on('end', () => {
-          next()
-        })
-    } else {
-      files.push(...options.input)
-      next()
-    }
-
-    return
+    return runFromLsFiles(rules, options)
   }
 
   if (options.inputFrom === 'file') {
@@ -2724,80 +2735,7 @@ function run(rules, options) {
       onlyRule.after(state, options)
 
       if (options.diff) {
-        let inputLines = originalLines
-        if (options.writeToFile) {
-          const file = options.writeToFile
-          if (fs.existsSync(file)) {
-            inputLines = fs.readFileSync(file, 'utf-8').split('\n')
-          } else {
-            inputLines = null
-          }
-        }
-
-        const linesDiff = inputLines ? diff(inputLines, finalLines) : []
-
-        const hasDiff =
-          linesDiff.length === 0 ||
-          (linesDiff.length &&
-            !(linesDiff.length === 1 && linesDiff[0].type === 'same'))
-        if (hasDiff) {
-          renderDiff(linesDiff, options)
-
-          if (options.write) {
-            if (options.interactive) {
-              if (!process.stdin.isTTY) {
-                options.error(
-                  red(
-                    `Cannot run interactively – input is coming from stdin`,
-                    options.color,
-                  ),
-                )
-                process.exit(1)
-              }
-
-              options.print(
-                yellow(
-                  `Write changes to ${options.writeToFile}? [Yn] `,
-                  options.color,
-                ),
-                false,
-              )
-              keepOpen()
-
-              const stdin = lineStream(process.stdin)
-              stdin.on('line', line => {
-                if (line === '' || line === 'y' || line === 'yes') {
-                  if (options.dryRun) {
-                    options.error(
-                      yellow(`Dry Run: ${options.writeToFile}`, options.color),
-                    )
-                  } else {
-                    writeLinesToFile(finalLines, options.writeToFile)
-                  }
-                } else if (line === 'n') {
-                  options.error(
-                    yellow(`Skipping ${options.writeToFile}`, options.color),
-                  )
-                } else {
-                  options.error(
-                    red(`Unknown response '${line}'. Aborting`, options.color),
-                  )
-                  process.exit(1)
-                }
-                stdin.close()
-                close()
-              })
-            } else {
-              if (options.dryRun) {
-                options.error(
-                  yellow(`Dry Run: ${options.writeToFile}`, options.color),
-                )
-              } else {
-                writeLinesToFile(finalLines, options.writeToFile)
-              }
-            }
-          }
-        }
+        outputDiff(originalLines, options, finalLines, keepOpen, close)
       } else {
         for (const line of finalLines) {
           options.print(line)
@@ -2838,6 +2776,7 @@ function processRules(rulesIter) {
         continue
       } else if ((lineRule = toLineRule(parsed))) {
       } else if ((documentRule = toDocumentRule(parsed))) {
+
       } else {
         throw new ArgError(`Invalid rule: ${rule}`)
       }
@@ -2935,7 +2874,7 @@ function finalize(onlyRule, originalLines, finalLines, state, options) {
     line,
     index + 1,
   ])
-  const nextLines = onlyRule.processDocument(finalLinesWithNumbers, options)
+  const nextLines = onlyRule.processDocument(finalLinesWithNumbers, state, options)
 
   if (isLastLineBlank) {
     const lastLine = onlyRule.blankLastLine()
@@ -3531,13 +3470,36 @@ if (!Array.prototype.toReversed) {
   }
 }
 
-try {
-  // remove 'node' and 'ssed' from argv
-  main(process.argv.slice(2))
-} catch (e) {
-  if (e instanceof ArgError) {
-    process.stderr.write(`ssed: ${e.message}\n`)
-  } else {
-    throw e
+function runFromCommandLine() {
+  process.stdout.on('error', function (err) {
+    if (err.code === 'EPIPE') {
+      exec('stty echo', () => {
+        process.exit(0)
+      })
+    }
+  })
+
+  try {
+    main(process.argv.slice(2))
+  } catch (e) {
+    if (e instanceof ArgError) {
+      process.stderr.write(`ssed: ${e.message}\n`)
+    } else {
+      throw e
+    }
   }
+}
+
+// Only run if being executed directly
+if (require.main === module) {
+  runFromCommandLine()
+}
+
+// Export functions for testing
+module.exports = {
+  main,
+  Rule,
+  LineRule,
+  DocumentRule,
+  parseRuleArgs,
 }
