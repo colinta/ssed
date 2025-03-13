@@ -2540,6 +2540,10 @@ function parseOption(options, arg, args) {
         file = args.shift()
       }
 
+      if (!file) {
+        throw new ArgError(`No file provided for --input (did you mean --ls?)`)
+      }
+
       const fileNames = file.split(',')
       const prevFiles =
         options.inputFrom === 'files'
