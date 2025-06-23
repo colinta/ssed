@@ -142,8 +142,11 @@ class OnlyLineRules extends OnlyRule {
     return this.processLines(lines, state, options)
   }
 
-  processLines(lines, state, options) {
+  before(state, options) {
     state.lineNumber = 0
+  }
+
+  processLines(lines, state, options) {
     return lines.flatMap(line => {
       state.lineNumber += 1
 
@@ -1681,7 +1684,7 @@ class TapRule extends LineRule {
   }
 
   line(line, lineNo) {
-    process.stderr.write(line + '\n')
+    console.log(line + '\n')
     return line
   }
 
@@ -2313,13 +2316,16 @@ function _toLineRangeTest(pattern, job) {
         return `every ${mod}-th - ${offset} line`
       }
 
-      return (_, lineNo) => (lineNo + offset) % mod === 0
+      return (_, lineNo) => {
+        return (lineNo + offset) % mod === 0
+      }
     } else {
       if (job === 'explain') {
         return `every ${modulus}-th line`
       }
 
-      return (_, lineNo) => lineNo % Number(modulus) === 0
+      return (_, lineNo) => {
+        return lineNo % Number(modulus) === 0}
     }
   }
 
@@ -2635,7 +2641,7 @@ async function main(args, options = {}) {
       process.stdout.write(line + (nl ? '\n' : ''))
     },
     error: (line, nl = true) => {
-      process.stderr.write(line + (nl ? '\n' : ''))
+      console.log(line + (nl ? '\n' : ''))
     },
     ...options,
   }
@@ -2735,7 +2741,7 @@ function run(rules, options) {
       onlyRule.after(state, options)
 
       if (options.diff) {
-        outputDiff(originalLines, options, finalLines, keepOpen, close)
+        outputDiff(originalLines, finalLines, keepOpen, close, options)
       } else {
         for (const line of finalLines) {
           options.print(line)
@@ -2980,11 +2986,11 @@ function parseRuleArgs(rule) {
 
 function version() {
   const VERSION = require('./package.json').version
-  process.stderr.write(VERSION + '\n')
+  console.log(VERSION + '\n')
 }
 
 function help() {
-  process.stderr.write(
+  console.log(
     // START HELP
     `ssed(1) -- general purpose stream and file editor
 ========
@@ -3374,6 +3380,83 @@ function diff(oldLines, newLines) {
   return result
 }
 
+function outputDiff(originalLines, finalLines, keepOpen, close, options) {
+  let inputLines = originalLines
+  if (options.writeToFile) {
+    const file = options.writeToFile
+    if (fs.existsSync(file)) {
+      inputLines = fs.readFileSync(file, 'utf-8').split('\n')
+    } else {
+      inputLines = null
+    }
+  }
+
+  const linesDiff = inputLines ? diff(inputLines, finalLines) : []
+
+  const hasDiff =
+    linesDiff.length === 0 ||
+    (linesDiff.length &&
+      !(linesDiff.length === 1 && linesDiff[0].type === 'same'))
+  if (hasDiff) {
+    renderDiff(linesDiff, options)
+
+    if (options.write) {
+      if (options.interactive) {
+        if (!process.stdin.isTTY) {
+          options.error(
+            red(
+              `Cannot run interactively – input is coming from stdin`,
+              options.color,
+            ),
+          )
+          process.exit(1)
+        }
+
+        options.print(
+          yellow(
+            `Write changes to ${options.writeToFile}? [Yn] `,
+            options.color,
+          ),
+          false,
+        )
+        keepOpen()
+
+        const stdin = lineStream(process.stdin)
+        stdin.on('line', line => {
+          if (line === '' || line === 'y' || line === 'yes') {
+            if (options.dryRun) {
+              options.error(
+                yellow(`Dry Run: ${options.writeToFile}`, options.color),
+              )
+            } else {
+              writeLinesToFile(finalLines, options.writeToFile)
+            }
+          } else if (line === 'n') {
+            options.error(
+              yellow(`Skipping ${options.writeToFile}`, options.color),
+            )
+          } else {
+            options.error(
+              red(`Unknown response '${line}'. Aborting`, options.color),
+            )
+            process.exit(1)
+          }
+          stdin.close()
+          close()
+        })
+      } else {
+        if (options.dryRun) {
+          options.error(
+            yellow(`Dry Run: ${options.writeToFile}`, options.color),
+          )
+        } else {
+          writeLinesToFile(finalLines, options.writeToFile)
+        }
+      }
+    }
+  }
+}
+
 function renderDiff(linesDiff, options) {
   options.print(yellow(options.diffHeader, options.color))
 
@@ -3483,7 +3566,7 @@ function runFromCommandLine() {
     main(process.argv.slice(2))
   } catch (e) {
     if (e instanceof ArgError) {
-      process.stderr.write(`ssed: ${e.message}\n`)
+      console.log(`ssed: ${e.message}\n`)
     } else {
       throw e
     }
