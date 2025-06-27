@@ -2463,7 +2463,7 @@ function parseOption(options, arg, args) {
     case 'no-dry-run':
     case 'dry-run': {
       return {
-        dryRun: option === 'dry-run',
+        dryRun: option !== 'no-dry-run',
       }
     }
     case 'no-diff':
@@ -2630,6 +2630,7 @@ function runFromLsFiles(rules, options) {
 async function main(args, options = {}) {
   options = {
     debug: false,
+    dryRun: false,
     input: process.stdin,
     inputFrom: 'stdin',
     explain: false,
@@ -2655,7 +2656,12 @@ async function main(args, options = {}) {
   let arg
   while ((arg = argsCopy.shift()) != null) {
     const option = parseOption(options, arg, argsCopy)
-    if (option !== undefined) {
+    if (Array.isArray(option)) {
+      options = option.reduce(
+        (opts, opt) => ({...opts, ...opt}),
+        options,
+      )
+    } else if (option !== undefined) {
       options = {...options, ...option}
     } else {
       rules.push(arg)
