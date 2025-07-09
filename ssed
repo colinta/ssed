@@ -1542,15 +1542,69 @@ class GroupMatchRule extends LineRule {
       throw new ArgError(`'${index}' does not support line numbers`)
     }
 
-    if (delim === '`') {
-      throw new ArgError(`'${index}' does not support literal matches`)
-    }
+    if (isLiteralDelim(delim) && !pattern) {
+      this.line = line => {
+        const columns = []
+        let wip = ''
+        let state = 'whitespace'
+        let quote = ''
+        let isSlash = false
+        // add a whitespace character to the end, guarantees a final invocation of 'if (wip)'
+        for (const char of line + '\f') {
+          if (state === 'whitespace') {
+            if (/\s/.test(char)) {
+              continue
+            }
 
-    if (!pattern) {
+            quote = ''
+            isSlash = false
+            state = 'text'
+
+            if (isLiteralDelim(char)) {
+              quote = char
+              wip = quote
+              continue
+            }
+          }
+
+          if (state === 'text') {
+            if (!isSlash && char === '/') {
+              isSlash = true
+            } else if (isSlash) {
+              wip += char
+              isSlash = false
+            } else if (
+              (quote && char === quote) ||
+              (!quote && /\s/.test(char))
+            ) {
+              wip += quote
+              state = 'whitespace'
+
+              if (wip) {
+                columns.push(wip)
+                if (columns.length >= index) {
+                  return columns[index - 1]
+                }
+                wip = ''
+              }
+            } else {
+              wip += char
+            }
+          }
+        }
+
+        // if we arrive here, we ran out of columns (skip line)
+        return null
+      }
+    } else if (!pattern) {
       this.line = line => {
         const match = line.split(/\s+/, index)
         return match.length >= index - 1 ? match[index - 1] : line
       }
+    } else if (isLiteralDelim(delim)) {
+      throw new ArgError(
+        `'${index}${delim}${pattern}' does not support literal delimiters and patterns (use regex with groups)`,
+      )
     } else {
       const regex = new RegExp(pattern, flags)
       this.line = line => {
@@ -1562,6 +1616,10 @@ class GroupMatchRule extends LineRule {
 
   explain() {
     if (!this.pattern) {
+      if (isLiteralDelim(this.delim)) {
+        return `Print column #${this.index}, columns are separated by whitespace, columns can be quoted.`
+      }
+
       return `Print column #${this.index}, columns are separated by whitespace`
     }
 
@@ -3160,7 +3218,9 @@ Remove the matching part of the line, and only print the lines that match
 * \`1/$pattern\`, \`2/$pattern\`, …
 Only print the first (or 2nd, or 3rd, …) group of the match
 * \`1\`, \`2\`, …
-Only print the first (or 2nd, or 3rd, …) "column" (columns are separated by whitespace)
+Same, columns are separated by whitespace
+* \`1"\`, \`2'\`, …
+Same, columns can be surrounded by quotes
 
 * \`prepend/$text\`, \`prefix/$text\`, \`append/$text\`, \`suffix/$text\`
 Adds text to the beginning (prepend) or end (append) of the line
