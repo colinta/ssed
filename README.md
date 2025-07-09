@@ -1,6 +1,7 @@
 ssed(1) -- general purpose stream and file editor
 ========
 
+
 SYNOPSIS
 -----
 
@@ -13,6 +14,7 @@ All editor rules use a "g/re/p"-like syntax:
 
     cmd/match[/replace][/flags]
 
+
 DESCRIPTION
 -----
 ssed is an alternative to 'sed'. Not a drop-in replacement, but used for similar tasks. I wanted more familiar and modern Regex support, and have kept adding more functions as ssed became more and more my go-to text manipulation tool.
@@ -22,6 +24,7 @@ Line rules transform on a line-by-line basis and, if only line rules are employe
 Document rules transform the entire document. STDIN is read to completion before document rules are executed.
 
 Like sed, any symbol can be used to separate the rule arguments, but unlike sed *some* separators change the behaviour of the command. The special separators are ':' and '\`'.
+
 
 OPTIONS
 -------
@@ -50,7 +53,7 @@ Provide a destination file name.
 Replace '%' with the input filename.
 
 * \`--interactive\` (\`--no-interactive\`)
-Ask before writing the file(s).
+Ask before writing the file(s). TODO: I want to use @teaui/core to create an interactive TUI app.
 
 * \`--dry-run\`, \`-n\` (\`--no-dry-run\`)
 Show which files would be affected.
@@ -64,6 +67,7 @@ Yes these work.
 * \`--color\` (\`--no-color\`)
 Enable ANSI colors (true if stdout is a TTY)
 
+
 SEPARATORS
 ----------
 
@@ -72,32 +76,23 @@ The separator can change the behaviour of the line rule. Rules that support patt
 * \`:\`
 Indicates a line-number rule. Not all rules support line numbers. Line numbers are not reset between rules (use the \`cat\` rule to reset line numbers).
 
-* \`\\\`\`
-Indicates a literal string match. From the shell, use this inside single quotes:
+* \`\\\`\`, \`\\"\`, \`\\'\`
+Indicates a literal string match.
 
+    ssed "s'foo'bar"
+    ssed 's"foo"bar'
     ssed 's\`foo\`bar'
 
 * \`/\`, \`|\`, \`=\`, \`-\`, \`{..}\`
 All other separators will use Regex with support for \`i, g\` flags. Matching brackets can also be used.
 
-### Examples:
+    ssed s/foo/bar/
+    ssed s/foo/bar/i
+    ssed s=foo=bar=
+    ssed s-foo-bar-
+    ssed 's|foo|bar|'
+    ssed s{foo}bar{i
 
-* \`s/\\w+/bar\`
-Regex match
-
-* \`s|\\w+|bar\`
-Alternative separator
-
-* \`s|\\w+|bar|i\`
-With case insensitive flag enabled
-
-* \`s\\\`foo\\\`bar\`
-Literal match against 'foo'
-* \`s:1:bar\`
-Matches line 1 (see LINE NUMBER RULES)
-
-* \`s{\\w+}bar\`, \`s{\\w+{bar{i\`
-Bracket pairs can also be used, but they don't have to match.
 
 LINE RULES
 ----------
@@ -119,17 +114,27 @@ Alias for \`del\` because I find it easier to remember.
 
 * \`t/$pattern\`, \`take/$pattern\`
 Only print the matching part of the line, or print the entire line if 'pattern' doesn't match
+* \`tp/$pattern\`, \`takeprint/$pattern\`, \`pt/$pattern\`
+Only print the matching part of the line, and only print the lines that match
 * \`r/$pattern\`, \`rm/$pattern\`
 Remove the matching part of the line, or print the entire line if 'pattern' doesn't match
+* \`rp/$pattern\`, \`rmprint/$pattern\`, \`pr/$pattern\`
+Remove the matching part of the line, and only print the lines that match
 * \`1/$pattern\`, \`2/$pattern\`, …
 Only print the first (or 2nd, or 3rd, …) group of the match
 * \`1\`, \`2\`, …
-Only print the first (or 2nd, or 3rd, …) "column" (columns are separated by whitespace)
+Same, columns are separated by whitespace
+* \`1"\`, \`2'\`, …
+Same, columns can be surrounded by quotes
 
 * \`prepend/$text\`, \`prefix/$text\`, \`append/$text\`, \`suffix/$text\`
 Adds text to the beginning (prepend) or end (append) of the line
-* \`surround/$prefix/$suffix\`
+* \`surround/$prefix/$suffix\`, \`surround/$both\`
 Adds text to the beginning *and* end of the line
+* \`quote\`
+Surrounds the line in double quotes, replacing " with \\"
+* \`unquote\`
+Removes initial and final matching quotes from the line. Preceding and trailing whitespace is preserved (\`trim\` to remove).
 
 * \`cols/$pattern/$columns\` e.g. \`cols/,/1,2,3\`
 Split the line by 'pattern' (default is \`/\\s+/\`) and print $columns, joined by ' '

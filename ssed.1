@@ -1,4 +1,4 @@
-.TH "SSED" "1" "June 2025" "1.6.5"
+.TH "SSED" "1" "July 2025" "1.7.5"
 .SH "NAME"
 \fBssed\fR \- general purpose stream and file editor
 .SH SYNOPSIS
@@ -68,7 +68,7 @@ Replace '%' with the input filename\.
 .IP \(bu 2
 `\-\-interactive` (`\-\-no\-interactive`)
 .br
-Ask before writing the file(s)\.
+Ask before writing the file(s)\. TODO: I want to use @teaui/core to create an interactive TUI app\.
 .IP \(bu 2
 `\-\-dry\-run`, `\-n` (`\-\-no\-dry\-run`)
 .br
@@ -97,44 +97,31 @@ The separator can change the behaviour of the line rule\. Rules that support pat
 .br
 Indicates a line\-number rule\. Not all rules support line numbers\. Line numbers are not reset between rules (use the `cat` rule to reset line numbers)\.
 .IP \(bu 2
-`\\``
+`\\``, `\\"`, `\\\|'`
 .br
-Indicates a literal string match\. From the shell, use this inside single quotes:
+Indicates a literal string match\.
 .P
+ssed "s'foo'bar"
+.br
+ssed 's"foo"bar'
+.br
 ssed 's`foo`bar'
 .IP \(bu 2
 `/`, `|`, `=`, `\-`, `{\.\.}`
 .br
 All other separators will use Regex with support for `i, g` flags\. Matching brackets can also be used\.
-
-.RE
-.SS Examples:
-
-.RS 1
-.IP \(bu 2
-`s/\\w+/bar`
+.P
+ssed s/foo/bar/
 .br
-Regex match
-.IP \(bu 2
-`s|\\w+|bar`
+ssed s/foo/bar/i
 .br
-Alternative separator
-.IP \(bu 2
-`s|\\w+|bar|i`
+ssed s=foo=bar=
 .br
-With case insensitive flag enabled
-.IP \(bu 2
-`s\\`foo\\`bar`
+ssed s\-foo\-bar\-
 .br
-Literal match against 'foo'
-.IP \(bu 2
-`s:1:bar`
+ssed 's|foo|bar|'
 .br
-Matches line 1 (see LINE NUMBER RULES)
-.IP \(bu 2
-`s{\\w+}bar`, `s{\\w+{bar{i`
-.br
-Bracket pairs can also be used, but they don't have to match\.
+ssed s{foo}bar{i
 
 .RE
 .SH LINE RULES
@@ -167,9 +154,17 @@ Alias for `del` because I find it easier to remember\.
 .br
 Only print the matching part of the line, or print the entire line if 'pattern' doesn't match
 .IP \(bu 2
+`tp/$pattern`, `takeprint/$pattern`, `pt/$pattern`
+.br
+Only print the matching part of the line, and only print the lines that match
+.IP \(bu 2
 `r/$pattern`, `rm/$pattern`
 .br
 Remove the matching part of the line, or print the entire line if 'pattern' doesn't match
+.IP \(bu 2
+`rp/$pattern`, `rmprint/$pattern`, `pr/$pattern`
+.br
+Remove the matching part of the line, and only print the lines that match
 .IP \(bu 2
 `1/$pattern`, `2/$pattern`, …
 .br
@@ -177,15 +172,27 @@ Only print the first (or 2nd, or 3rd, …) group of the match
 .IP \(bu 2
 `1`, `2`, …
 .br
-Only print the first (or 2nd, or 3rd, …) "column" (columns are separated by whitespace)
+Same, columns are separated by whitespace
+.IP \(bu 2
+`1"`, `2'`, …
+.br
+Same, columns can be surrounded by quotes
 .IP \(bu 2
 `prepend/$text`, `prefix/$text`, `append/$text`, `suffix/$text`
 .br
 Adds text to the beginning (prepend) or end (append) of the line
 .IP \(bu 2
-`surround/$prefix/$suffix`
+`surround/$prefix/$suffix`, `surround/$both`
 .br
 Adds text to the beginning \fIand\fR end of the line
+.IP \(bu 2
+`quote`
+.br
+Surrounds the line in double quotes, replacing " with \\"
+.IP \(bu 2
+`unquote`
+.br
+Removes initial and final matching quotes from the line\. Preceding and trailing whitespace is preserved (`trim` to remove)\.
 .IP \(bu 2
 `cols/$pattern/$columns` e\.g\. `cols/,/1,2,3`
 .br
