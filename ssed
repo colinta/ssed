@@ -11,6 +11,10 @@ function requireArg(name, value) {
   }
 }
 
+function isLiteralDelim(delim) {
+  return delim === '`' || delim === '"' || delim === "'"
+}
+
 class Rule {
   delim = ''
   pattern = ''
@@ -284,7 +288,7 @@ class IfConditionRule extends ConditionalRule {
     let check
     if (delim === ':') {
       check = toLineRangeTest(pattern)
-    } else if (delim === '`') {
+    } else if (isLiteralDelim(delim)) {
       check = line => line.includes(pattern)
     } else {
       const regex = new RegExp(pattern, flags)
@@ -348,7 +352,7 @@ class BetweenConditionRule extends ConditionalRule {
     if (delim === ':') {
       checkStart = toLineRangeTest(startPattern)
       checkStop = toLineRangeTest(stopPattern)
-    } else if (delim === '`') {
+    } else if (isLiteralDelim(delim)) {
       checkStart = line => line.includes(startPattern)
       checkStop = line => line.includes(stopPattern)
     } else {
@@ -539,7 +543,11 @@ class LimitedDocumentRule extends DocumentRule {
     }
 
     if (didMatch) {
-      const processedLines = this.documentRule.processDocument(buffer, state, options)
+      const processedLines = this.documentRule.processDocument(
+        buffer,
+        state,
+        options,
+      )
       returnLines.push(...processedLines)
     } else if (!didMatch && buffer.length) {
       returnLines.push(...buffer)
@@ -652,8 +660,9 @@ function toCondRule([cmd, pattern, replace, rest, delim]) {
 }
 
 /**
- * Performs a single substitution on every line that matches. Use gsub to replace
- * multiple substitutions per-line.
+ * Performs a single substitution on every line that matches. Use `gsub` to replace
+ * multiple substitutions per-line. This rule is the workhorse of `ssed`. Learn it
+ * well. It's meant to be a much more useful version of `sed 's/.../.../'`.
  *
  * When matching line numbers (':' delimiter), the entire line is replaced with the
  * matching text.
@@ -694,7 +703,7 @@ class SubstitutionRule extends LineRule {
         }
         return line
       }
-    } else if (delim === '`') {
+    } else if (isLiteralDelim(delim)) {
       if (flags && flags.includes('i')) {
         this.line = line => {
           const index = line.toLowerCase().indexOf(pattern.toLowerCase())
@@ -755,7 +764,7 @@ class GlobalSubstitutionRule extends LineRule {
     requireArg('pattern', pattern)
     super(delim, pattern, replace ?? '', [])
 
-    if (delim === '`') {
+    if (isLiteralDelim(delim)) {
       if (flags && flags.includes('i')) {
         this.line = line => {
           let index = 0
@@ -813,10 +822,10 @@ class SplitRule extends LineRule {
       throw new ArgError(`'split' does not support line numbers`)
     }
 
-    pattern ??= delim === '`' ? ' ' : '\\w'
+    pattern ??= isLiteralDelim(delim) ? ' ' : '\\w'
     super(delim, pattern, '', [])
 
-    if (delim === '`') {
+    if (isLiteralDelim(delim)) {
       if (flags && flags.includes('i')) {
         this.line = line => {
           const lines = []
@@ -882,7 +891,7 @@ class TakeRule extends LineRule {
 
     super(delim, pattern, '', [])
 
-    if (delim === '`') {
+    if (isLiteralDelim(delim)) {
       this.line = line => {
         if (line.includes(pattern)) {
           return pattern
@@ -933,7 +942,7 @@ class RemoveRule extends LineRule {
 
     super(delim, pattern, '', [])
 
-    if (delim === '`') {
+    if (isLiteralDelim(delim)) {
       this.line = line => line.replace(pattern, '')
     } else {
       const regex = new RegExp(pattern, flags)
@@ -985,7 +994,7 @@ class PrintLineRule extends LineRule {
 
     if (delim === ':') {
       this.check = toLineRangeTest(pattern)
-    } else if (delim === '`') {
+    } else if (isLiteralDelim(delim)) {
       this.check = line => line.includes(pattern)
     } else {
       const regex = new RegExp(pattern, flags)
@@ -1006,13 +1015,13 @@ class PrintLineRule extends LineRule {
  * Removes lines that match the pattern. Inverse of "print".
  *
  * Usage:
- *    ssed del/{pattern}
- *    ssed del:{line-number}
+ *     ssed del/{pattern}
+ *     ssed del:{line-number}
  *
  * Aliases:
- *    ssed d/{pattern}
- *    ssed !p/{pattern}
- *    ssed !print/{pattern}
+ *     ssed d/{pattern}
+ *     ssed !p/{pattern}
+ *     ssed !print/{pattern}
  *
  * When matching line numbers, the matching lines are removed.
  *
@@ -1037,7 +1046,7 @@ class DeleteLineRule extends LineRule {
 
     if (delim === ':') {
       this.check = toLineRangeTest(pattern)
-    } else if (delim === '`') {
+    } else if (isLiteralDelim(delim)) {
       this.check = line => line.includes(pattern)
     } else {
       const regex = new RegExp(pattern, flags)
@@ -1072,11 +1081,11 @@ class DeleteLineRule extends LineRule {
  * Does not support line-numbers.
  *
  * Usage:
- *    ssed unique
- *    ssed unique/{pattern}
+ *     ssed unique
+ *     ssed unique/{pattern}
  *
  * Aliases:
- *    ssed uniq
+ *     ssed uniq
  *
  * @example
  *     alice
@@ -1103,7 +1112,7 @@ class UniqueRule extends LineRule {
       throw new ArgError(`'uniq' does not support line numbers`)
     }
 
-    if (delim === '`') {
+    if (isLiteralDelim(delim)) {
       throw new ArgError(`'uniq' does not support literal matches`)
     }
 
@@ -1148,9 +1157,9 @@ class UniqueRule extends LineRule {
  * but 'left' or 'right' can be specified to only trim on one side.
  *
  * Usage:
- *    ssed trim
- *    ssed trim:left
- *    ssed trim:right
+ *     ssed trim
+ *     ssed trim:left
+ *     ssed trim:right
  *
  * @example '|' indicates start and end of line
  *     |     line 1|
@@ -1184,9 +1193,14 @@ class TrimRule extends LineRule {
         this.trim = line => line.replace(/\s+$/, '')
         break
       case 'both':
-      default:
+      case null:
+      case '':
         this.trim = line => line.trim()
         break
+      default:
+        throw new ArgError(
+          `Invalid pattern for 'trim': ${pattern}. Use 'left', 'right', or 'both' (default: both).`,
+        )
     }
 
     this.line = line => this.trim(line)
@@ -1208,7 +1222,7 @@ class TrimRule extends LineRule {
  * Surround each line with text.
  *
  * Usage:
- *    ssed surround/{prepend}/{append}
+ *     ssed surround/{prepend}/{append}
  *
  * @example
  *     1
@@ -1226,7 +1240,7 @@ class SurroundRule extends LineRule {
   constructor(delim, prepend, append) {
     super(delim, '', '', []) // pattern and replace are not used in this rule
     this.prepend = prepend ?? ''
-    this.append = append ?? ''
+    this.append = append ?? prepend ?? ''
   }
 
   line(line) {
@@ -1242,10 +1256,10 @@ class SurroundRule extends LineRule {
  * Prepends (prefix) each line with text.
  *
  * Usage:
- *    ssed prepend/{text}
+ *     ssed prepend/{text}
  *
  * Aliases:
- *    ssed prefix/{text}
+ *     ssed prefix/{text}
  *
  * @example
  *     1
@@ -1270,10 +1284,10 @@ class PrependRule extends SurroundRule {
  * Append (suffix) each line with text.
  *
  * Usage:
- *    ssed append/{text}
+ *     ssed append/{text}
  *
  * Aliases:
- *    ssed suffix/{text}
+ *     ssed suffix/{text}
  *
  * @example
  *     1
@@ -1298,16 +1312,18 @@ class AppendRule extends SurroundRule {
  * Insert text after each matching line.
  *
  * Usage:
- *    ssed insert/{pattern}/{text}
+ *     ssed insert/{pattern}/{text}
  *
  * @example
  *     1
  *     2
  *     3
- *     4 | 'insert:%2:!!!' => ->1<-
- *                            ->2<-
- *                            ->3<-
- *                            ->4<-
+ *     4 | 'insert:%2:!!!' => 1
+ *                            2
+ *                            !!!
+ *                            3
+ *                            4
+ *                            !!!
  */
 class InsertRule extends LineRule {
   check
@@ -1320,7 +1336,7 @@ class InsertRule extends LineRule {
 
     if (delim === ':') {
       this.check = toLineRangeTest(pattern)
-    } else if (delim === '`') {
+    } else if (isLiteralDelim(delim)) {
       this.check = line => line.includes(pattern)
     } else {
       const regex = new RegExp(pattern, flags)
@@ -1353,11 +1369,11 @@ class InsertRule extends LineRule {
  * toggle: printing starts on, toggles on matching lines
  *
  * Usage:
- *    ssed on/{pattern}
- *    ssed on:{line-number}
- *    ssed after/{pattern}
- *    ssed off/{pattern}
- *    ssed toggle/{pattern}
+ *     ssed on/{pattern}
+ *     ssed on:{line-number}
+ *     ssed after/{pattern}
+ *     ssed off/{pattern}
+ *     ssed toggle/{pattern}
  *
  * @example
  *     a
@@ -1383,7 +1399,7 @@ class ControlPrintingRule extends LineRule {
       this.check = (_, lineNo) => lineNo === 1
     } else if (delim === ':') {
       this.check = toLineRangeTest(pattern)
-    } else if (delim === '`') {
+    } else if (isLiteralDelim(delim)) {
       this.check = line => line.includes(pattern)
     } else {
       const regex = new RegExp(pattern, flags)
@@ -1502,14 +1518,14 @@ class ControlPrintingRule extends LineRule {
  * Does not support line-numbers.
  *
  * Usage:
- *    # for every line that matches pattern, replace the Nth regex group
- *    ssed 1/{pattern(group1)}
- *    ssed 2/{pattern(group1)(group2)}
- *    ssed …/{pattern(…)}
+ *     # for every line that matches pattern, replace the Nth regex group
+ *     ssed 1/(\d+)
+ *     ssed 2/(\d+)\.(\d+)
  *
- *    # print the first "column" (columns are separated by whitespace, quotes are
- *    # ignored)
- *    ssed 1
+ *     # print the first "column" (columns are separated by whitespace, quotes are ignored)
+ *     ssed 1
+ *     # columns are separated by whitespace, possibly surrounded by quotes
+ *     ssed 1\'
  *
  * @example
  *     text | 1/\w(\w+)$ => ext
@@ -1549,11 +1565,11 @@ class GroupMatchRule extends LineRule {
       return `Print column #${this.index}, columns are separated by whitespace`
     }
 
-    return `Replace ${explainPattern(
+    return `Only print group #${this.index} from regex ${explainPattern(
       this.delim,
       this.pattern,
       'pattern',
-    )} with group #${this.index}`
+    )}`
   }
 }
 
@@ -1561,15 +1577,15 @@ class GroupMatchRule extends LineRule {
  * A straightforward 'awk' feature: separate line on whitespace and print certain columns.
  *
  * Usage:
- *    # Use default separator (\s+) and print columns 1,3,2
- *    ssed cols//1,3,2
+ *     # Use default separator (\s+) and print columns 1,3,2
+ *     ssed cols//1,3,2
  *
- *    # Split lines by ':' and print columns 1 and 5
- *    # (columns will be joined with a space)
- *    ssed cols/:/1,5
+ *     # Split lines by ':' and print columns 1 and 5
+ *     # (columns will be joined with a space)
+ *     ssed cols/:/1,5
  *
- *    # Same, but join columns using ':'
- *    ssed cols/:/1,5/:
+ *     # Same, but join columns using ':'
+ *     ssed cols/:/1,5/:
  *
  * @example
  *     this    is    text | cols//2,1,3 => is this text
@@ -1598,7 +1614,7 @@ class ColumnsRule extends LineRule {
     this.columns = columns.split(',').map(Number)
 
     let splitter
-    if (pattern && delim === '`') {
+    if (pattern && isLiteralDelim(delim)) {
       splitter = pattern
     } else if (pattern) {
       splitter = new RegExp(pattern === '' ? /\s+/ : pattern)
@@ -1638,6 +1654,10 @@ class ColumnsRule extends LineRule {
   }
 }
 
+/**
+ * Combines the behaviour of multiple rules. See `takeprint` and `rmprint` rules,
+ * which only print the lines that matched the take/remove pattern.
+ */
 class CombineRules extends LineRule {
   _rules
 
@@ -1694,6 +1714,13 @@ class TapRule extends LineRule {
 }
 
 function toLineRule([cmd, pattern, replace, rest, delim]) {
+  if (pattern === undefined) {
+    pattern = ''
+    if (replace === undefined) {
+      replace = ''
+    }
+  }
+
   switch (cmd) {
     case 'sub':
     case 's':
@@ -1959,7 +1986,7 @@ class DocumentSubstituteLinesRule extends DocumentRule {
     let check
     if (delim === ':') {
       check = toLineRangeTest(pattern)
-    } else if (delim === '`') {
+    } else if (isLiteralDelim(delim)) {
       if (flags && flags.includes('i')) {
         check = line => line.toLowerCase().includes(pattern.toLowerCase)
       } else {
@@ -2249,7 +2276,7 @@ function explainPattern(delim, pattern, text) {
     return _toLineRangeTest(pattern, 'explain')
   }
 
-  if (delim === '`') {
+  if (isLiteralDelim(delim)) {
     if (text === 'pattern') {
       return `'${escapeLiteral(pattern)}'`
     } else if (text === 'matching-lines') {
@@ -2325,14 +2352,17 @@ function _toLineRangeTest(pattern, job) {
       }
 
       return (_, lineNo) => {
-        return lineNo % Number(modulus) === 0}
+        return lineNo % Number(modulus) === 0
+      }
     }
   }
 
   if (pattern.includes('-')) {
     const command = pattern.match(/^(\d+)-(\d+)$/)
     if (!command) {
-      throw new ArgError(`Invalid line range pattern '${pattern}'. Line numbers must be positive.`)
+      throw new ArgError(
+        `Invalid line range pattern '${pattern}'. Line numbers must be positive.`,
+      )
     }
 
     let [start, stop] = pattern.split('-', 2).map((number, index) => {
@@ -2792,7 +2822,6 @@ function processRules(rulesIter) {
         continue
       } else if ((lineRule = toLineRule(parsed))) {
       } else if ((documentRule = toDocumentRule(parsed))) {
-
       } else {
         throw new ArgError(`Invalid rule: ${rule}`)
       }
@@ -2890,7 +2919,11 @@ function finalize(onlyRule, originalLines, finalLines, state, options) {
     line,
     index + 1,
   ])
-  const nextLines = onlyRule.processDocument(finalLinesWithNumbers, state, options)
+  const nextLines = onlyRule.processDocument(
+    finalLinesWithNumbers,
+    state,
+    options,
+  )
 
   if (isLastLineBlank) {
     const lastLine = onlyRule.blankLastLine()
@@ -3005,6 +3038,7 @@ function help() {
     `ssed(1) -- general purpose stream and file editor
 ========
 
+
 SYNOPSIS
 -----
 
@@ -3017,6 +3051,7 @@ All editor rules use a "g/re/p"-like syntax:
 
     cmd/match[/replace][/flags]
 
+
 DESCRIPTION
 -----
 ssed is an alternative to 'sed'. Not a drop-in replacement, but used for similar tasks. I wanted more familiar and modern Regex support, and have kept adding more functions as ssed became more and more my go-to text manipulation tool.
@@ -3026,6 +3061,7 @@ Line rules transform on a line-by-line basis and, if only line rules are employe
 Document rules transform the entire document. STDIN is read to completion before document rules are executed.
 
 Like sed, any symbol can be used to separate the rule arguments, but unlike sed *some* separators change the behaviour of the command. The special separators are ':' and '\`'.
+
 
 OPTIONS
 -------
@@ -3054,7 +3090,7 @@ Provide a destination file name.
 Replace '%' with the input filename.
 
 * \`--interactive\` (\`--no-interactive\`)
-Ask before writing the file(s).
+Ask before writing the file(s). TODO: I want to use @teaui/core to create an interactive TUI app.
 
 * \`--dry-run\`, \`-n\` (\`--no-dry-run\`)
 Show which files would be affected.
@@ -3068,6 +3104,7 @@ Yes these work.
 * \`--color\` (\`--no-color\`)
 Enable ANSI colors (true if stdout is a TTY)
 
+
 SEPARATORS
 ----------
 
@@ -3076,32 +3113,23 @@ The separator can change the behaviour of the line rule. Rules that support patt
 * \`:\`
 Indicates a line-number rule. Not all rules support line numbers. Line numbers are not reset between rules (use the \`cat\` rule to reset line numbers).
 
-* \`\\\`\`
-Indicates a literal string match. From the shell, use this inside single quotes:
+* \`\\\`\`, \`\\"\`, \`\\'\`
+Indicates a literal string match.
 
+    ssed "s'foo'bar"
+    ssed 's"foo"bar'
     ssed 's\`foo\`bar'
 
 * \`/\`, \`|\`, \`=\`, \`-\`, \`{..}\`
 All other separators will use Regex with support for \`i, g\` flags. Matching brackets can also be used.
 
-### Examples:
+    ssed s/foo/bar/
+    ssed s/foo/bar/i
+    ssed s=foo=bar=
+    ssed s-foo-bar-
+    ssed 's|foo|bar|'
+    ssed s{foo}bar{i
 
-* \`s/\\w+/bar\`
-Regex match
-
-* \`s|\\w+|bar\`
-Alternative separator
-
-* \`s|\\w+|bar|i\`
-With case insensitive flag enabled
-
-* \`s\\\`foo\\\`bar\`
-Literal match against 'foo'
-* \`s:1:bar\`
-Matches line 1 (see LINE NUMBER RULES)
-
-* \`s{\\w+}bar\`, \`s{\\w+{bar{i\`
-Bracket pairs can also be used, but they don't have to match.
 
 LINE RULES
 ----------
@@ -3123,8 +3151,12 @@ Alias for \`del\` because I find it easier to remember.
 
 * \`t/$pattern\`, \`take/$pattern\`
 Only print the matching part of the line, or print the entire line if 'pattern' doesn't match
+* \`tp/$pattern\`, \`takeprint/$pattern\`, \`pt/$pattern\`
+Only print the matching part of the line, and only print the lines that match
 * \`r/$pattern\`, \`rm/$pattern\`
 Remove the matching part of the line, or print the entire line if 'pattern' doesn't match
+* \`rp/$pattern\`, \`rmprint/$pattern\`, \`pr/$pattern\`
+Remove the matching part of the line, and only print the lines that match
 * \`1/$pattern\`, \`2/$pattern\`, …
 Only print the first (or 2nd, or 3rd, …) group of the match
 * \`1\`, \`2\`, …
@@ -3132,7 +3164,7 @@ Only print the first (or 2nd, or 3rd, …) "column" (columns are separated by wh
 
 * \`prepend/$text\`, \`prefix/$text\`, \`append/$text\`, \`suffix/$text\`
 Adds text to the beginning (prepend) or end (append) of the line
-* \`surround/$prefix/$suffix\`
+* \`surround/$prefix/$suffix\`, \`surround/$both\`
 Adds text to the beginning *and* end of the line
 
 * \`cols/$pattern/$columns\` e.g. \`cols/,/1,2,3\`
@@ -3563,7 +3595,7 @@ if (!Array.prototype.toReversed) {
   }
 }
 
-function runFromCommandLine() {
+async function runFromCommandLine() {
   process.stdout.on('error', function (err) {
     if (err.code === 'EPIPE') {
       exec('stty echo', () => {
@@ -3573,7 +3605,7 @@ function runFromCommandLine() {
   })
 
   try {
-    main(process.argv.slice(2))
+    await main(process.argv.slice(2))
   } catch (e) {
     if (e instanceof ArgError) {
       console.log(`ssed: ${e.message}\n`)
