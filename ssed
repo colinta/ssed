@@ -1309,6 +1309,79 @@ class AppendRule extends SurroundRule {
 }
 
 /**
+ * Quotes each line with text. Only supports double quotes, because single quotes
+ * are too finicky.
+ *
+ * Usage:
+ *     ssed quote
+ *
+ * @example
+ *     1
+ *     '2'
+ *     "3"
+ *     4 | quote => "1"
+ *                  "'2'"
+ *                  "\"3\""
+ *                  "4"
+ */
+class QuoteRule extends SurroundRule {
+  constructor(delim, prependText) {
+    if (delim) {
+      throw new ArgError(
+        `'quote' does not support delimiters (only outputs double quotes)`,
+      )
+    }
+    super(delim, prependText, '')
+  }
+
+  line(line) {
+    return '"' + line.replaceAll('"', '\\"') + '"'
+  }
+
+  explain() {
+    return `Surround each line with double quotes, replacing " with \\"`
+  }
+}
+
+/**
+ * Removes starting and ending quotes from each line. Preceding and trailing whitespace is preserved.
+ *
+ * Usage:
+ *     ssed quote
+ *
+ * @example
+ *     1
+ *     '2'
+ *       "3"
+ *     4 | unquote => 1
+ *                    2
+ *                      3
+ *                    4
+ */
+class UnquoteRule extends SurroundRule {
+  constructor(delim, prependText) {
+    if (delim) {
+      throw new ArgError(
+        `'quote' does not support delimiters (only outputs double quotes)`,
+      )
+    }
+    super(delim, prependText, '')
+  }
+
+  line(line) {
+    const match = line.match(/^(\s*)(["'`])(.*)\2(\s*)$/)
+    if (match) {
+      return match[1] + match[3] + match[4];
+    }
+    return line
+  }
+
+  explain() {
+    return `Surround each line with double quotes, replacing " with \\"`
+  }
+}
+
+/**
  * Insert text after each matching line.
  *
  * Usage:
@@ -1829,6 +1902,10 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
       return new AppendRule(delim, pattern)
     case 'surround':
       return new SurroundRule(delim, pattern, replace)
+    case 'quote':
+      return new QuoteRule(delim, pattern)
+    case 'unquote':
+      return new UnquoteRule(delim, pattern)
     case 'insert':
       return new InsertRule(delim, pattern, replace, rest[0] || '')
     case 'on':
@@ -3226,6 +3303,10 @@ Same, columns can be surrounded by quotes
 Adds text to the beginning (prepend) or end (append) of the line
 * \`surround/$prefix/$suffix\`, \`surround/$both\`
 Adds text to the beginning *and* end of the line
+* \`quote\`
+Surrounds the line in double quotes, replacing " with \\"
+* \`unquote\`
+Removes initial and final matching quotes from the line. Preceding and trailing whitespace is preserved (\`trim\` to remove).
 
 * \`cols/$pattern/$columns\` e.g. \`cols/,/1,2,3\`
 Split the line by 'pattern' (default is \`/\\s+/\`) and print $columns, joined by ' '
