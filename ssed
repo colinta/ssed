@@ -1829,6 +1829,62 @@ class CombineRules extends LineRule {
   }
 }
 
+/**
+ * A rule that prints lines that match a pattern and takes the matching part of the
+ * line.
+ *
+ * Usage:
+ *     ssed tp/{pattern}
+ *     ssed tp`literal`
+ */
+class TakePrintRule extends CombineRules {
+  constructor(delim, pattern, flags) {
+    if (delim === ':') {
+      throw new ArgError(`'takeprint' does not support line numbers`)
+    }
+
+    const print = new PrintLineRule(delim, pattern, flags)
+    const take = new TakeRule(delim, pattern, flags)
+    super(print, take)
+  }
+
+  explain(rules) {
+    return `Only print lines that match ${explainPattern(
+      this.delim,
+      this.pattern,
+      'pattern',
+    )} and only print the matching part of the line.`
+  }
+}
+
+/**
+ * A rule that prints lines that match a pattern and removes the matching part of
+ * the line.
+ *
+ * Usage:
+ *     ssed rp/{pattern}
+ *     ssed rp`literal`
+ */
+class RemovePrintRule extends CombineRules {
+  constructor(delim, pattern, flags) {
+    if (delim === ':') {
+      throw new ArgError(`'rmprint' does not support line numbers`)
+    }
+
+    const print = new PrintLineRule(delim, pattern, flags)
+    const take = new TakeRule(delim, pattern, flags)
+    super(print, take)
+  }
+
+  explain(rules) {
+    return `Only print lines that match ${explainPattern(
+      this.delim,
+      this.pattern,
+      'pattern',
+    )} and remove the matching part of the line.`
+  }
+}
+
 class TapRule extends LineRule {
   constructor() {
     super('', '', '', [])
@@ -1873,16 +1929,12 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
     case 'takeprint':
     case 'pt':
     case 'tp': {
-      const take = new TakeRule(delim, pattern, rest[0] || '')
-      const print = new PrintLineRule(delim, pattern, rest[0] || '')
-      return new CombineRules(print, take)
+      return new TakePrintRule(delim, pattern, rest[0] || '')
     }
     case 'rmprint':
     case 'pr':
     case 'rp': {
-      const remove = new RemoveRule(delim, pattern, rest[0] || '')
-      const print = new PrintLineRule(delim, pattern, rest[0] || '')
-      return new CombineRules(print, remove)
+      return new RemovePrintRule(delim, pattern, rest[0] || '')
     }
     case 'del':
     case 'd':
