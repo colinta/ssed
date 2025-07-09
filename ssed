@@ -2258,6 +2258,55 @@ class DocumentExecRule extends DocumentRule {
   }
 }
 
+/**
+ * Combines 'prefix' and 'exec' rules into one.
+ *
+ * Usage:
+ *     ssed xargs/echo
+ *
+ * @example
+ *     file1.md
+ *     file2.md
+ *     file3.md
+ *     file4.md | xargs/rm => removes the files
+ */
+class XargsExecRule extends DocumentRule {
+  command
+
+  constructor(command) {
+    super('', '', '', [])
+    if (!command) {
+      throw new ArgError(`'xargs' requires a command to execute`)
+    }
+
+    this.command = command
+  }
+
+  lines(documentLines, state, options) {
+    let command = this.command
+    if (!command.endsWith(' ')) {
+      command += ' '
+    }
+    const input = documentLines.map(([line]) => command + line).join('\n')
+
+    if (options.dryRun) {
+      return input.split('\n')
+    }
+
+    if (input) {
+      return execSync(input).toString('utf-8').split('\n')
+    }
+
+    return []
+  }
+
+  explain() {
+    return `Prefix every line with '${escapeLiteral(
+      this.command,
+    )}', execute as a shell script, and replace with the command output`
+  }
+}
+
 class DocumentSurroundRule extends DocumentRule {
   prependLines
   appendLines
@@ -2427,6 +2476,8 @@ function toDocumentRule([cmd, pattern, replace, rest, delim]) {
       )
     case 'exec':
       return new DocumentExecRule()
+    case 'xargs':
+      return new XargsExecRule(pattern)
     case 'help':
       help()
       process.exit(0)
