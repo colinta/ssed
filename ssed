@@ -161,7 +161,7 @@ class OnlyLineRules extends OnlyRule {
       let mappedLines = [line]
       for (const lineRule of this._rules) {
         mappedLines = mappedLines.flatMap(line => {
-          let nextLines = lineRule.run(line, state.lineNumber, state)
+          let nextLines = lineRule.run(line, state.lineNumber, state, options)
           if (nextLines == null) {
             // ensure that run() is always called once
             return [null]
@@ -215,13 +215,13 @@ class LineRule extends Rule {
    */
   run(line, lineNo, state, options) {
     if (line != null) {
-      return this.line(line, lineNo)
+      return this.line(line, lineNo, options)
     }
   }
   /**
    * Should only run on lines that have text, even if the text is ''
    */
-  line(line, lineNo) {}
+  line(line, lineNo, options) {}
 
   /**
    * Run after every line (or lines, if a rule returns multiple lines)
@@ -789,12 +789,6 @@ class GlobalSubstitutionRule extends LineRule {
     }
   }
 
-  run(line, lineNo, state, options) {
-    if (line != null) {
-      return this.line(line, lineNo)
-    }
-  }
-
   explain() {
     return `Replace all matches of ${explainPattern(
       this.delim,
@@ -960,7 +954,7 @@ class RemoveRule extends LineRule {
 }
 
 /**
- * Only print lines that match 'pattern'.
+ * Only print lines that match 'pattern' – `grep`, in other words.
  *
  * When matching line numbers, only the matching lines are printed. This works
  * identically to the 'take' command.
@@ -1371,7 +1365,7 @@ class UnquoteRule extends SurroundRule {
   line(line) {
     const match = line.match(/^(\s*)(["'`])(.*)\2(\s*)$/)
     if (match) {
-      return match[1] + match[3] + match[4];
+      return match[1] + match[3] + match[4]
     }
     return line
   }
@@ -1809,9 +1803,15 @@ class CombineRules extends LineRule {
     this._rules.forEach(rule => rule.beforeEach(line, state))
   }
 
-  run(line, lineNo, state) {
+  run(line, lineNo, state, options) {
     return this._rules.reduce(
-      (line, rule) => rule.run(line, lineNo, state),
+      (line, rule) => {
+        if (Array.isArray(line)) {
+          return line.flatMap(line => rule.run(line, lineNo, state, options))
+        } else {
+          return rule.run(line, lineNo, state, options)
+        }
+      },
       line,
     )
   }
@@ -1890,13 +1890,64 @@ class TapRule extends LineRule {
     super('', '', '', [])
   }
 
-  line(line, lineNo) {
-    console.log(line + '\n')
+  line(line, _lineNo, options) {
+    options.stderr.write(line + '\n')
     return line
   }
 
   explain() {
     return 'Output each line to STDERR'
+  }
+}
+
+/**
+ * Combines 'prefix' and 'exec' rules into one. Unlike 'exec' (a document rule),
+ * xargs is a line rule, which means it runs the command on every line (each line
+ * is run in its own subprocess).
+ *
+ * Usage:
+ *     ssed xargs/echo
+ *
+ * @example
+ *     file1.md
+ *     file2.md
+ *     file3.md
+ *     file4.md | xargs/rm => removes the files
+ */
+class XargsExecRule extends LineRule {
+  command
+
+  constructor(command) {
+    super('', '', '', [])
+    if (!command) {
+      throw new ArgError(`'xargs' requires a command to execute`)
+    }
+
+    this.command = command
+  }
+
+  line(line, _lineNo, options) {
+    let command = this.command
+    if (!command.endsWith(' ')) {
+      command += ' '
+    }
+    const input = command + line
+
+    if (options.dryRun) {
+      return input
+    }
+
+    if (input.trim()) {
+      return execSync(input).toString('utf-8').split('\n').filter(line => line.trim() !== '')
+    }
+
+    return []
+  }
+
+  explain() {
+    return `Prefix every line with '${escapeLiteral(
+      this.command,
+    )}', execute as a shell script, and replace with the command output`
   }
 }
 
@@ -1923,6 +1974,7 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
     case 'rm':
     case 'r':
       return new RemoveRule(delim, pattern, rest[0] || '')
+    case 'grep':
     case 'print':
     case 'p':
       return new PrintLineRule(delim, pattern, rest[0] || '')
@@ -1969,6 +2021,8 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
       return new ColumnsRule(delim, pattern, replace, rest)
     case 'tap':
       return new TapRule()
+    case 'xargs':
+      return new XargsExecRule(pattern)
     default:
       if (cmd.match(/^\d+$/)) {
         const index = parseInt(cmd)
@@ -2258,55 +2312,6 @@ class DocumentExecRule extends DocumentRule {
   }
 }
 
-/**
- * Combines 'prefix' and 'exec' rules into one.
- *
- * Usage:
- *     ssed xargs/echo
- *
- * @example
- *     file1.md
- *     file2.md
- *     file3.md
- *     file4.md | xargs/rm => removes the files
- */
-class XargsExecRule extends DocumentRule {
-  command
-
-  constructor(command) {
-    super('', '', '', [])
-    if (!command) {
-      throw new ArgError(`'xargs' requires a command to execute`)
-    }
-
-    this.command = command
-  }
-
-  lines(documentLines, state, options) {
-    let command = this.command
-    if (!command.endsWith(' ')) {
-      command += ' '
-    }
-    const input = documentLines.map(([line]) => command + line).join('\n')
-
-    if (options.dryRun) {
-      return input.split('\n')
-    }
-
-    if (input) {
-      return execSync(input).toString('utf-8').split('\n')
-    }
-
-    return []
-  }
-
-  explain() {
-    return `Prefix every line with '${escapeLiteral(
-      this.command,
-    )}', execute as a shell script, and replace with the command output`
-  }
-}
-
 class DocumentSurroundRule extends DocumentRule {
   prependLines
   appendLines
@@ -2476,8 +2481,6 @@ function toDocumentRule([cmd, pattern, replace, rest, delim]) {
       )
     case 'exec':
       return new DocumentExecRule()
-    case 'xargs':
-      return new XargsExecRule(pattern)
     case 'help':
       help()
       process.exit(0)
@@ -2722,9 +2725,11 @@ function parseOption(options, arg, args) {
         explain: true,
       }
     case 'no-color':
-    case 'color': {
+    case 'no-colour':
+    case 'color':
+    case 'colour': {
       return {
-        color: option === 'color',
+        color: option === 'color' || option === 'colour',
       }
     }
     case 'n':
@@ -2899,6 +2904,7 @@ async function main(args, options = {}) {
   options = {
     debug: false,
     dryRun: false,
+    stderr: process.stderr,
     input: process.stdin,
     inputFrom: 'stdin',
     explain: false,
@@ -2925,10 +2931,7 @@ async function main(args, options = {}) {
   while ((arg = argsCopy.shift()) != null) {
     const option = parseOption(options, arg, argsCopy)
     if (Array.isArray(option)) {
-      options = option.reduce(
-        (opts, opt) => ({...opts, ...opt}),
-        options,
-      )
+      options = option.reduce((opts, opt) => ({...opts, ...opt}), options)
     } else if (option !== undefined) {
       options = {...options, ...option}
     } else {
@@ -3380,7 +3383,7 @@ Replace the first instance of $search with $replace, or replace matching $lines 
 * \`g/$search/$replace\`, \`gsub/$search/$replace\`
 Replace every instance of 'search' with 'replace'. Does not support line numbers.
 
-* \`p/$pattern\`, \`print/$pattern\`, \`p:$lines\`
+* \`p/$pattern\`, \`print/$pattern\`, \`p:$lines\`, \`grep/$pattern\`
 Only print lines that match $pattern (or $lines)
 * \`d/$pattern\`, \`del/$pattern\`, \`d:$lines\`
 Do not print lines that match 'pattern' (or $lines)
