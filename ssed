@@ -2745,6 +2745,30 @@ function parseOption(options, arg, args) {
         diff: option === 'diff',
       }
     }
+    case 'diff-context': {
+      let diffContext
+      if (arg.match(/^--\w+=/)) {
+        ;[, diffContext] = arg.split('=', 2)
+      } else {
+        diffContext = args.shift()
+      }
+      if (diffContext == null) {
+        throw new ArgError(
+          `No diff context provided. Usage '--diff-context=<number>'`
+        )
+      }
+      diffContext = parseInt(diffContext, 10)
+      if (typeof diffContext !== 'number' || diffContext < 0) {
+        throw new ArgError(
+          `Invalid diff context '${diffContext}', expected a non-negative number`,
+        )
+      }
+
+      return {
+        diff: true,
+        diffContext,
+      }
+    }
     case 'no-interactive':
     case 'interactive': {
       return {
@@ -3313,6 +3337,8 @@ Most options can be turned off using the \`--no-\` prefix, e.g. \`--no-dry-run\`
 
 * \`--diff\` (\`--no-diff\`)
 Show differences instead of streaming the output.
+* \`--diff-context=N\`, \`--diff-context N\`
+Show differences instead of streaming the output. Also implies \`--diff\`.
 
 * \`--stdin\`
 (Default) Run rules against standard input.
@@ -3591,7 +3617,7 @@ function diff(oldLines, newLines) {
 
     if (oldLines[oldIndex] === newLines[newIndex]) {
       // Lines are the same
-      let sameCount = 0
+      let sameCount = 1
       while (
         oldIndex + sameCount < oldLines.length &&
         newIndex + sameCount < newLines.length &&
@@ -3599,6 +3625,7 @@ function diff(oldLines, newLines) {
       ) {
         sameCount++
       }
+
       result.push({
         type: 'same',
         lines: oldLines.slice(oldIndex, oldIndex + sameCount),
@@ -3606,7 +3633,11 @@ function diff(oldLines, newLines) {
       oldIndex += sameCount
       newIndex += sameCount
     } else {
-      // remove lines from old until same line
+      // calculate remove and add count for "left hand" (find the first line from
+      // oldLines that is still remaining in newLines - remove from old up until that
+      // point, and add from new up until that point) and "right hand" (find the first
+      // line in newLines that is still remaining in oldLines). Whichever count is *less*
+      // (the smaller change), apply that as a diff.
       let lhRemoveCount = 0
       let lhAddCount = 0
       while (
@@ -3616,7 +3647,10 @@ function diff(oldLines, newLines) {
       ) {
         lhRemoveCount++
       }
-      if (oldIndex + lhRemoveCount < oldLines.length) {
+
+      if (
+        newLines.indexOf(oldLines[oldIndex + lhRemoveCount], newIndex) !== -1
+      ) {
         lhAddCount =
           newLines.indexOf(oldLines[oldIndex + lhRemoveCount], newIndex) -
           newIndex
@@ -3633,11 +3667,12 @@ function diff(oldLines, newLines) {
       ) {
         rhAddCount++
       }
-      if (newIndex + rhAddCount < newLines.length) {
+
+      if (oldLines.indexOf(newLines[newIndex + rhAddCount], oldIndex) !== -1) {
         rhRemoveCount =
           oldLines.indexOf(newLines[newIndex + rhAddCount], oldIndex) - oldIndex
       } else {
-        rhRemoveCount = oldLines.length - newIndex
+        rhRemoveCount = oldLines.length - oldIndex
       }
 
       if (lhRemoveCount + lhAddCount < rhAddCount + rhRemoveCount) {
@@ -3775,7 +3810,7 @@ function renderDiff(linesDiff, options) {
         didPrintNumbers = false
 
         const printLines = entry.lines.slice(
-          Math.max(entry.lines.length - 3, 0),
+          Math.max(entry.lines.length - options.diffContext, 0),
         )
         inputLineNumber += entry.lines.length - printLines.length
         outputLineNumber += entry.lines.length - printLines.length
@@ -3784,23 +3819,23 @@ function renderDiff(linesDiff, options) {
         inputLineNumber += printLines.length
         outputLineNumber += printLines.length
       } else if (index === linesDiff.length - 1) {
-        const printLines = entry.lines.slice(0, 4)
+        const printLines = entry.lines.slice(0, options.diffContext - 1)
         printLineNumbers(inputLineNumber, outputLineNumber)
         inputLineNumber += entry.lines.length - printLines.length
         outputLineNumber += entry.lines.length - printLines.length
         printLines.forEach(line => options.print(' ' + line))
         inputLineNumber += printLines.length
         outputLineNumber += printLines.length
-      } else if (entry.lines.length <= 5) {
+      } else if (entry.lines.length <= 2 * options.diffContext - 1) {
         entry.lines.forEach(line => options.print(' ' + line))
         inputLineNumber += entry.lines.length
         outputLineNumber += entry.lines.length
       } else {
         didPrintNumbers = false
 
-        const beforeLines = entry.lines.slice(0, 3)
+        const beforeLines = entry.lines.slice(0, options.diffContext)
         const afterLines = entry.lines.slice(
-          Math.max(entry.lines.length - 3, 0),
+          Math.max(entry.lines.length - options.diffContext, 0),
         )
         beforeLines.forEach(line => options.print(' ' + line))
         inputLineNumber += entry.lines.length - afterLines.length
