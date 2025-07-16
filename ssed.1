@@ -1,4 +1,4 @@
-.TH "SSED" "1" "July 2025" "1.7.5"
+.TH "SSED" "1" "July 2025" "1.8.5"
 .SH "NAME"
 \fBssed\fR \- general purpose stream and file editor
 .SH SYNOPSIS
@@ -37,6 +37,10 @@ Most options can be turned off using the `\-\-no\-` prefix, e\.g\. `\-\-no\-dry\
 `\-\-diff` (`\-\-no\-diff`)
 .br
 Show differences instead of streaming the output\.
+.IP \(bu 2
+`\-\-diff\-context=N`, `\-\-diff\-context N`
+.br
+Show differences instead of streaming the output\. Also implies `\-\-diff`\|\.
 .IP \(bu 2
 `\-\-stdin`
 .br
@@ -138,7 +142,7 @@ Replace the first instance of $search with $replace, or replace matching $lines 
 .br
 Replace every instance of 'search' with 'replace'\. Does not support line numbers\.
 .IP \(bu 2
-`p/$pattern`, `print/$pattern`, `p:$lines`
+`p/$pattern`, `print/$pattern`, `p:$lines`, `grep/$pattern`
 .br
 Only print lines that match $pattern (or $lines)
 .IP \(bu 2

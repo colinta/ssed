@@ -35,6 +35,8 @@ Most options can be turned off using the \`--no-\` prefix, e.g. \`--no-dry-run\`
 
 * \`--diff\` (\`--no-diff\`)
 Show differences instead of streaming the output.
+* \`--diff-context=N\`, \`--diff-context N\`
+Show differences instead of streaming the output. Also implies \`--diff\`.
 
 * \`--stdin\`
 (Default) Run rules against standard input.
@@ -105,7 +107,7 @@ Replace the first instance of $search with $replace, or replace matching $lines 
 * \`g/$search/$replace\`, \`gsub/$search/$replace\`
 Replace every instance of 'search' with 'replace'. Does not support line numbers.
 
-* \`p/$pattern\`, \`print/$pattern\`, \`p:$lines\`
+* \`p/$pattern\`, \`print/$pattern\`, \`p:$lines\`, \`grep/$pattern\`
 Only print lines that match $pattern (or $lines)
 * \`d/$pattern\`, \`del/$pattern\`, \`d:$lines\`
 Do not print lines that match 'pattern' (or $lines)

@@ -1,6 +1,6 @@
 {
   "name": "ssed",
-  "version": "1.7.5",
+  "version": "1.8.5",
   "description": "Fed up with trying to remember sed's weird regex support? Me, too.",
   "main": "ssed",
   "directories": {
