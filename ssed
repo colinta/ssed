@@ -2747,7 +2747,7 @@ function parseOption(options, arg, args) {
     }
     case 'diff-context': {
       let diffContext
-      if (arg.match(/^--\w+=/)) {
+      if (arg.match(/^--diff-context=/)) {
         ;[, diffContext] = arg.split('=', 2)
       } else {
         diffContext = args.shift()
@@ -2786,7 +2786,7 @@ function parseOption(options, arg, args) {
       throw new ArgError(`Invalid option: ${option}, use \`--no-write\``)
     case 'write': {
       let writeToFile
-      if (arg.match(/^--\w+=/)) {
+      if (arg.match(/^--write=/)) {
         ;[, writeToFile] = arg.split('=', 2)
       }
 
@@ -2798,7 +2798,7 @@ function parseOption(options, arg, args) {
     }
     case 'write-to': {
       let writeToFile
-      if (arg.match(/^--\w+=/)) {
+      if (arg.match(/^--write-to=/)) {
         ;[, writeToFile] = arg.split('=', 2)
       } else {
         writeToFile = args.shift()
@@ -2812,7 +2812,7 @@ function parseOption(options, arg, args) {
     }
     case 'write-rename': {
       let writeToFile
-      if (arg.match(/^--\w+=/)) {
+      if (arg.match(/^--write-rename=/)) {
         ;[, writeToFile] = arg.split('=', 2)
       } else {
         writeToFile = args.shift()
@@ -2831,7 +2831,7 @@ function parseOption(options, arg, args) {
       return {inputFrom: 'ls', input: null}
     case 'input': {
       let file
-      if (arg.match(/^--\w+=/)) {
+      if (arg.match(/^--input=/)) {
         ;[, file] = arg.split('=', 2)
       } else {
         file = args.shift()
