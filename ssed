@@ -1912,18 +1912,22 @@ class TapRule extends LineRule {
  *     file1.md
  *     file2.md
  *     file3.md
- *     file4.md | xargs/rm => removes the files
+ *     file4.md | xargs/rm  => removes the files
+ *
+ *     file1 ... file4.md | xargs=mv=../  => moves the files up a folder
  */
 class XargsExecRule extends LineRule {
   command
+  rest
 
-  constructor(command) {
+  constructor(command, rest) {
     super('', '', '', [])
     if (!command) {
       throw new ArgError(`'xargs' requires a command to execute`)
     }
 
     this.command = command
+    this.rest = rest || []
   }
 
   line(line, _lineNo, options) {
@@ -1931,7 +1935,10 @@ class XargsExecRule extends LineRule {
     if (!command.endsWith(' ')) {
       command += ' '
     }
-    const input = command + line
+    let input = command + line
+    if (this.rest.length) {
+      input += ' ' + this.rest.join(' ')
+    }
 
     if (options.dryRun) {
       return input
@@ -1945,9 +1952,14 @@ class XargsExecRule extends LineRule {
   }
 
   explain() {
-    return `Prefix every line with '${escapeLiteral(
+    let command = `Prefix every line with '${escapeLiteral(
       this.command,
-    )}', execute as a shell script, and replace with the command output`
+    )}'`
+    if (this.rest.length) {
+      command += ` and append with '${this.rest.join(' ')}'`
+    }
+
+    return `${command}, and execute as a shell script. Replace the line with the command stdout.`
   }
 }
 
@@ -2022,7 +2034,7 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
     case 'tap':
       return new TapRule()
     case 'xargs':
-      return new XargsExecRule(pattern)
+      return new XargsExecRule(pattern, replace ? [replace, ...rest] : [])
     default:
       if (cmd.match(/^\d+$/)) {
         const index = parseInt(cmd)
@@ -3460,6 +3472,9 @@ Only print unique lines. Optionanly, uniqueness can be determined by the matchin
 * \`tap\`
 Prints the *current document* to STDERR. Usefull for debugging, or in conjunction with \`--write\` to verify expected output.
 
+* \`xargs/cmd\`, \`xargs/cmd/..args\`
+Prefix every line with \`[cmd] ...\` and suffix with \`[args]\` (if provided). Each line will be executed, replacing the line with stdout.
+
 DOCUMENT RULES
 --------------
 
@@ -3486,6 +3501,9 @@ Join lines with a space or $separator.
 
 * \`cat\`
 Print the entire document. This is useful for resetting line numbers.
+
+* \`exec\`
+Execute the document as a script. *BE CAREFUL, YA DUMMY! Use \`--dry-run\` first!*
 
 CONDITIONS
 ----------
