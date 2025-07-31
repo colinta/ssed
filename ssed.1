@@ -1,4 +1,4 @@
-.TH "SSED" "1" "July 2025" "1.8.6"
+.TH "SSED" "1" "July 2025" "1.9.6"
 .SH "NAME"
 \fBssed\fR \- general purpose stream and file editor
 .SH SYNOPSIS
@@ -229,6 +229,10 @@ Only print unique lines\. Optionanly, uniqueness can be determined by the matchi
 `tap`
 .br
 Prints the \fIcurrent document\fR to STDERR\. Usefull for debugging, or in conjunction with `\-\-write` to verify expected output\.
+.IP \(bu 2
+`xargs/cmd`, `xargs/cmd/\.\.args`
+.br
+Prefix every line with `[cmd] \.\.\.` and suffix with `[args]` (if provided)\. Each line will be executed, replacing the line with stdout\.
 
 .RE
 .SH DOCUMENT RULES
@@ -268,6 +272,10 @@ Join lines with a space or $separator\.
 `cat`
 .br
 Print the entire document\. This is useful for resetting line numbers\.
+.IP \(bu 2
+`exec`
+.br
+Execute the document as a script\. \fIBE CAREFUL, YA DUMMY! Use `\-\-dry\-run` first!\fR
 
 .RE
 .SH CONDITIONS

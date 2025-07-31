@@ -158,6 +158,9 @@ Only print unique lines. Optionanly, uniqueness can be determined by the matchin
 * \`tap\`
 Prints the *current document* to STDERR. Usefull for debugging, or in conjunction with \`--write\` to verify expected output.
 
+* \`xargs/cmd\`, \`xargs/cmd/..args\`
+Prefix every line with \`[cmd] ...\` and suffix with \`[args]\` (if provided). Each line will be executed, replacing the line with stdout.
+
 DOCUMENT RULES
 --------------
 
@@ -184,6 +187,9 @@ Join lines with a space or $separator.
 
 * \`cat\`
 Print the entire document. This is useful for resetting line numbers.
+
+* \`exec\`
+Execute the document as a script. *BE CAREFUL, YA DUMMY! Use \`--dry-run\` first!*
 
 CONDITIONS
 ----------
