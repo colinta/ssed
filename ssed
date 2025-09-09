@@ -2611,7 +2611,7 @@ function _toLineRangeTest(pattern, job) {
   }
 
   if (pattern.includes('-')) {
-    const command = pattern.match(/^(\d+)-(\d+)$/)
+    const command = pattern.match(/^(\d*)-(\d*)$/)
     if (!command) {
       throw new ArgError(
         `Invalid line range pattern '${pattern}'. Line numbers must be positive.`,
