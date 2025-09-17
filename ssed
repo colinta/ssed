@@ -3188,9 +3188,6 @@ function finalize(onlyRule, originalLines, finalLines, state, options) {
   const lastLine = originalLines.at(-1)
 
   let isLastLineBlank = lastLine == ''
-  if (isLastLineBlank) {
-    state.lineNumber += 1
-  }
 
   const finalLinesWithNumbers = finalLines.map((line, index) => [
     line,
