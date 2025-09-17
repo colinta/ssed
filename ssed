@@ -2956,7 +2956,7 @@ async function main(args, options = {}) {
       process.stdout.write(line + (nl ? '\n' : ''))
     },
     error: (line, nl = true) => {
-      console.log(line + (nl ? '\n' : ''))
+      console.error(line + (nl ? '\n' : ''))
     },
     ...options,
   }
@@ -3306,11 +3306,11 @@ function parseRuleArgs(rule) {
 
 function version() {
   const VERSION = require('./package.json').version
-  console.log(VERSION + '\n')
+  console.info(VERSION + '\n')
 }
 
 function help() {
-  console.log(
+  console.info(
     // START HELP
     `ssed(1) -- general purpose stream and file editor
 ========
@@ -3908,7 +3908,7 @@ async function runFromCommandLine() {
     await main(process.argv.slice(2))
   } catch (e) {
     if (e instanceof ArgError) {
-      console.log(`ssed: ${e.message}\n`)
+      console.error(`ssed: ${e.message}\n`)
     } else {
       throw e
     }
