@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const fs = require('fs')
-const EventEmitter = require('events')
+const {Readable} = require('stream')
 const {exec, execSync} = require('child_process')
 
 class ArgError extends Error {}
@@ -2169,7 +2169,7 @@ class DocumentReverseRule extends DocumentRule {
   }
 
   lines(documentLines) {
-    return documentLines.toReversed()
+    return documentLines.map(([line]) => line).toReversed()
   }
 
   explain() {
@@ -2652,63 +2652,67 @@ function _toLineRangeTest(pattern, job) {
   return (_, lineNo) => lineNo === Number(pattern)
 }
 
-function lineStream(inputStream, transform = undefined) {
-  const stdin = new EventEmitter()
+/**
+ * Converts a source into a ReadableStream<string> of lines.
+ * Accepts: ReadableStream, Node Readable stream, or string.
+ */
+function toWebStream(source) {
+  if (typeof source === 'string') {
+    return new ReadableStream({
+      start(controller) {
+        controller.enqueue(source)
+        controller.close()
+      },
+    })
+  }
+
+  if (source instanceof ReadableStream) {
+    return source
+  }
+
+  // Node stream (process.stdin, fs.createReadStream, etc.)
+  if (typeof source.pipe === 'function') {
+    return Readable.toWeb(source)
+  }
+
+  throw new Error(`Unsupported input source: ${typeof source}`)
+}
+
+/**
+ * Async generator that yields lines from a ReadableStream.
+ * Handles chunk buffering and line splitting.
+ */
+async function* readLines(source) {
+  const webStream = toWebStream(source)
+  const reader = webStream.pipeThrough(new TextDecoderStream()).getReader()
   let buffer = ''
-  let closed = false
 
-  function emit(line) {
-    if (closed) {
-      return
+  try {
+    while (true) {
+      const {done, value} = await reader.read()
+      if (done) break
+      buffer += value
+      const lines = buffer.split('\n')
+      buffer = lines.pop()
+      for (const line of lines) {
+        yield line
+      }
     }
-
-    if (transform) {
-      line = transform(line)
-    }
-
-    if (line !== undefined) {
-      stdin.emit('line', line)
-    }
+    // Yield the remaining buffer (last line without trailing newline)
+    yield buffer
+  } finally {
+    reader.releaseLock()
   }
+}
 
-  inputStream.on('open', function () {
-    stdin.emit('open')
-  })
-  inputStream.on('data', function (chunk) {
-    buffer += chunk
-    const lines = buffer.split('\n')
-    buffer = lines.pop()
-    lines.forEach(line => emit(line))
-  })
-
-  inputStream.on('end', () => {
-    emit(buffer)
-    let autoclose = true
-    function keepOpen() {
-      autoclose = false
-    }
-    function close() {
-      stdin.emit('close')
-    }
-    stdin.emit('end', keepOpen, close)
-    if (autoclose) {
-      close()
-    }
-  })
-
-  inputStream.resume()
-  inputStream.setEncoding('utf-8')
-
-  stdin.pause = inputStream.pause.bind(inputStream)
-  stdin.close = () => {
-    closed = true
-    inputStream.pause()
+/**
+ * Reads a single line from a source. Used for interactive prompts.
+ */
+async function readOneLine(source) {
+  for await (const line of readLines(source)) {
+    return line
   }
-  stdin.pipe = transform => {
-    return lineStream(stdin, transform)
-  }
-
-  return stdin
+  return ''
 }
 
 function parseOption(options, arg, args) {
@@ -2887,53 +2891,30 @@ function parseOption(options, arg, args) {
   }
 }
 
-function runFromLsFiles(rules, options) {
-  const emitter = new EventEmitter()
+async function runFromLsFiles(rules, options) {
   const files = []
 
-  function next() {
-    const file = files.pop()
-    if (file == null) {
-      emitter.emit('end')
-      return
+  if (options.inputFrom === 'ls') {
+    for await (const file of readLines(process.stdin)) {
+      if (file !== '') {
+        files.push(file)
+      }
+    }
+  } else {
+    files.push(...options.input)
+  }
+
+  for (const file of files) {
+    if (!options.diff) {
+      options.print(yellow(`ssed: ${file}`))
     }
 
-    const stream = run(rules, {
+    await run(rules, {
       ...options,
       inputFrom: 'file',
       input: file,
     })
-
-    stream.on('open', () => {
-      if (!options.diff) {
-        options.print(yellow(`ssed: ${file}`))
-      }
-    })
-
-    stream.on('end', () => {
-      next()
-    })
   }
-
-  if (options.inputFrom === 'ls') {
-    const stdin = lineStream(process.stdin)
-    // treat stdin as list of files
-    stdin
-      .on('line', file => {
-        if (file === '') {
-          return
-        }
-        files.push(file)
-      })
-      .on('end', () => {
-        next()
-      })
-  } else {
-    files.push(...options.input)
-    next()
-  }
-
-  return emitter
 }
 
 async function main(args, options = {}) {
@@ -2975,18 +2956,10 @@ async function main(args, options = {}) {
     }
   }
 
-  return new Promise((resolve, reject) => {
-    try {
-      const stream = run(rules, options)
-      stream.on('end', resolve)
-      stream.on('error', reject)
-    } catch (error) {
-      reject(error)
-    }
-  })
+  return run(rules, options)
 }
 
-function run(rules, options) {
+async function run(rules, options) {
   const rulesIter = (function* () {
     for (let index = 0; index < rules.length; index++) {
       yield rules[index]
@@ -3021,7 +2994,8 @@ function run(rules, options) {
 --- ${options.input}
 +++ ${diff}`
 
-    options.input = fs.createReadStream(file)
+    const fileHandle = await fs.promises.open(file, 'r')
+    options.input = fileHandle.readableWebStream()
   } else if (
     options.inputFrom === 'stdin' &&
     options.write &&
@@ -3032,7 +3006,6 @@ function run(rules, options) {
     )
   }
 
-  const inputStream = lineStream(options.input)
   const originalLines = []
   let finalLines = []
 
@@ -3048,23 +3021,20 @@ function run(rules, options) {
   const state = resetState()
   onlyRule.before(state, options)
 
-  return inputStream
-    .on('line', line => {
-      eachLine(onlyRule, line, originalLines, finalLines, state, options)
-    })
-    .on('end', (keepOpen, close) => {
-      finalLines = finalize(onlyRule, originalLines, finalLines, state, options)
+  for await (const line of readLines(options.input)) {
+    eachLine(onlyRule, line, originalLines, finalLines, state, options)
+  }
 
-      onlyRule.after(state, options)
+  finalLines = finalize(onlyRule, originalLines, finalLines, state, options)
+  onlyRule.after(state, options)
 
-      if (options.diff) {
-        outputDiff(originalLines, finalLines, keepOpen, close, options)
-      } else {
-        for (const line of finalLines) {
-          options.print(line)
-        }
-      }
-    })
+  if (options.diff) {
+    await outputDiff(originalLines, finalLines, options)
+  } else {
+    for (const line of finalLines) {
+      options.print(line)
+    }
+  }
 }
 
 function processRules(rulesIter) {
@@ -3719,7 +3689,7 @@ function diff(oldLines, newLines) {
   return result
 }
 
-function outputDiff(originalLines, finalLines, keepOpen, close, options) {
+async function outputDiff(originalLines, finalLines, options) {
   let inputLines = originalLines
   if (options.writeToFile) {
     const file = options.writeToFile
@@ -3758,31 +3728,26 @@ function outputDiff(originalLines, finalLines, keepOpen, close, options) {
           ),
           false,
         )
-        keepOpen()
 
-        const stdin = lineStream(process.stdin)
-        stdin.on('line', line => {
-          if (line === '' || line === 'y' || line === 'yes') {
-            if (options.dryRun) {
-              options.error(
-                yellow(`Dry Run: ${options.writeToFile}`, options.color),
-              )
-            } else {
-              writeLinesToFile(finalLines, options.writeToFile)
-            }
-          } else if (line === 'n') {
+        const line = await readOneLine(process.stdin)
+        if (line === '' || line === 'y' || line === 'yes') {
+          if (options.dryRun) {
             options.error(
-              yellow(`Skipping ${options.writeToFile}`, options.color),
+              yellow(`Dry Run: ${options.writeToFile}`, options.color),
             )
           } else {
-            options.error(
-              red(`Unknown response '${line}'. Aborting`, options.color),
-            )
-            process.exit(1)
+            writeLinesToFile(finalLines, options.writeToFile)
           }
-          stdin.close()
-          close()
-        })
+        } else if (line === 'n') {
+          options.error(
+            yellow(`Skipping ${options.writeToFile}`, options.color),
+          )
+        } else {
+          options.error(
+            red(`Unknown response '${line}'. Aborting`, options.color),
+          )
+          process.exit(1)
+        }
       } else {
         if (options.dryRun) {
           options.error(
