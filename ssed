@@ -1375,6 +1375,207 @@ class UnquoteRule extends SurroundRule {
   }
 }
 
+// C0 controls, DEL, C1 controls, and the unicode line/paragraph separators.
+const NON_PRINTABLE = /[\x00-\x1f\x7f-\x9f\u2028\u2029]/
+
+function hex(code, width) {
+  return code.toString(16).padStart(width, '0')
+}
+
+function escapeChars(line, escapeChar) {
+  let escaped = ''
+  for (const char of line) {
+    escaped += escapeChar(char) ?? char
+  }
+  return escaped
+}
+
+const BASH_ESCAPES = {
+  '\x07': '\\a',
+  '\b': '\\b',
+  '\x1b': '\\e',
+  '\f': '\\f',
+  '\n': '\\n',
+  '\r': '\\r',
+  '\t': '\\t',
+  '\v': '\\v',
+}
+
+// Escape sequences compatible with bash $'...' strings (and `echo -e`, `printf`)
+function escapeBashChar(char, quotes) {
+  if (char === '\\' || quotes.includes(char)) {
+    return '\\' + char
+  }
+  if (BASH_ESCAPES[char]) {
+    return BASH_ESCAPES[char]
+  }
+  if (NON_PRINTABLE.test(char)) {
+    // UTF-8 bytes, because bash 3 doesn't support \u
+    return Array.from(new TextEncoder().encode(char), byte => '\\x' + hex(byte, 2)).join('')
+  }
+}
+
+function escapeBash(line) {
+  return escapeChars(line, char => escapeBashChar(char, `'"`))
+}
+
+function quoteBash(line) {
+  if (NON_PRINTABLE.test(line) || (line.includes("'") && line.includes('!'))) {
+    return "$'" + escapeChars(line, char => escapeBashChar(char, "'")) + "'"
+  }
+
+  if (!line.includes("'")) {
+    return "'" + line + "'"
+  }
+
+  return '"' + line.replace(/["\\$`]/g, char => '\\' + char) + '"'
+}
+
+const JSON_ESCAPES = {
+  '\b': '\\b',
+  '\f': '\\f',
+  '\n': '\\n',
+  '\r': '\\r',
+  '\t': '\\t',
+}
+
+function escapeJsonChar(char, quote) {
+  if (char === '\\' || char === quote) {
+    return '\\' + char
+  }
+  if (JSON_ESCAPES[char]) {
+    return JSON_ESCAPES[char]
+  }
+  if (NON_PRINTABLE.test(char)) {
+    return '\\u' + hex(char.codePointAt(0), 4)
+  }
+}
+
+function quoteJson(line) {
+  return '"' + escapeChars(line, char => escapeJsonChar(char, '"')) + '"'
+}
+
+function count(line, search) {
+  return line.split(search).length - 1
+}
+
+// Picks whichever of ', ", ` requires the fewest escapes (preferring that order)
+function quoteJavascript(line) {
+  const candidates = [
+    ["'", count(line, "'")],
+    ['"', count(line, '"')],
+    ['`', count(line, '`') + count(line, '${')],
+  ]
+  const [quote] = candidates.reduce((best, candidate) =>
+    candidate[1] < best[1] ? candidate : best,
+  )
+
+  let escaped = escapeChars(line, char => escapeJsonChar(char, quote))
+  if (quote === '`') {
+    escaped = escaped.replaceAll('${', '\\${')
+  }
+  return quote + escaped + quote
+}
+
+const PYTHON_ESCAPES = {
+  '\n': '\\n',
+  '\r': '\\r',
+  '\t': '\\t',
+}
+
+// Same quote selection as Python's repr()
+function quotePython(line) {
+  const quote = line.includes("'") && !line.includes('"') ? '"' : "'"
+  const escaped = escapeChars(line, char => {
+    if (char === '\\' || char === quote) {
+      return '\\' + char
+    }
+    if (PYTHON_ESCAPES[char]) {
+      return PYTHON_ESCAPES[char]
+    }
+    if (NON_PRINTABLE.test(char)) {
+      const code = char.codePointAt(0)
+      return code <= 0xff ? '\\x' + hex(code, 2) : '\\u' + hex(code, 4)
+    }
+  })
+  return quote + escaped + quote
+}
+
+const ESCAPE_MODES = {
+  bash: {
+    escape: escapeBash,
+    explain: `Escape non-printable characters, backslashes, and quotes using bash-compatible backslash escapes`,
+  },
+  quotes: {
+    escape: quoteBash,
+    explain: `Quote each line for bash, using single quotes, double quotes, or $'...' as appropriate`,
+  },
+  json: {
+    escape: quoteJson,
+    explain: `Quote each line as a JSON string`,
+  },
+  javascript: {
+    escape: quoteJavascript,
+    explain: `Quote each line as a JavaScript string, using single quotes, double quotes, or backticks as appropriate`,
+  },
+  python: {
+    escape: quotePython,
+    explain: `Quote each line as a Python string, using single or double quotes as appropriate`,
+  },
+}
+
+const ESCAPE_ALIASES = {
+  '': 'bash',
+  sh: 'bash',
+  quote: 'quotes',
+  js: 'json',
+  py: 'python',
+}
+
+/**
+ * Escapes non-printable characters (e.g. \x1b) and quotes. The default escapes
+ * using backslashes, compatible with bash $'...' strings. Other modes quote the
+ * entire line, choosing a reasonable quote character.
+ *
+ * Usage:
+ *     ssed escape             # backslash escapes (bash compatible)
+ *     ssed escape/quotes      # quote for bash
+ *     ssed escape/json        # JSON string (always double quotes)
+ *     ssed escape/js          # alias for json
+ *     ssed escape/javascript  # single, double, or backtick quotes
+ *     ssed escape/python      # single or double quotes (alias: py)
+ *
+ * @example
+ *     it's "here" | escape => it\'s \"here\"
+ *     it's "here" | escape/quotes => "it's \"here\""
+ *     it's "here" | escape/json => "it's \"here\""
+ *     it's "here" | escape/javascript => `it's "here"`
+ *     it's "here" | escape/python => 'it\'s "here"'
+ */
+class EscapeRule extends LineRule {
+  mode
+
+  constructor(delim, pattern) {
+    super(delim, pattern ?? '', '', [])
+
+    const name = (pattern ?? '').toLowerCase()
+    this.mode = ESCAPE_MODES[ESCAPE_ALIASES[name] ?? name]
+    if (!this.mode) {
+      throw new ArgError(
+        `Invalid format for 'escape': ${pattern}. Use 'quotes', 'json', 'js', 'javascript', 'python', or 'py' (default: bash).`,
+      )
+    }
+  }
+
+  line(line) {
+    return this.mode.escape(line)
+  }
+
+  explain() {
+    return this.mode.explain
+  }
+}
+
 /**
  * Insert text after each matching line.
  *
@@ -2022,6 +2223,8 @@ function toLineRule([cmd, pattern, replace, rest, delim]) {
       return new QuoteRule(delim, pattern)
     case 'unquote':
       return new UnquoteRule(delim, pattern)
+    case 'escape':
+      return new EscapeRule(delim, pattern)
     case 'insert':
       return new InsertRule(delim, pattern, replace, rest[0] || '')
     case 'on':
@@ -3418,6 +3621,16 @@ Adds text to the beginning *and* end of the line
 Surrounds the line in double quotes, replacing " with \\"
 * \`unquote\`
 Removes initial and final matching quotes from the line. Preceding and trailing whitespace is preserved (\`trim\` to remove).
+* \`escape\`
+Escapes non-printable characters (e.g. \`\\x1b\` => \`\\e\`), backslashes and quotes using backslashes, compatible with bash \`$'...'\` strings.
+* \`escape/quotes\`
+Quotes the line for bash, using single quotes, double quotes, or \`$'...'\` (if the line has non-printable characters).
+* \`escape/json\`, \`escape/js\`
+Quotes the line as a JSON string (double quotes).
+* \`escape/javascript\`
+Quotes the line as a JavaScript string, choosing single quotes, double quotes, or backticks (whichever needs the fewest escapes).
+* \`escape/python\`, \`escape/py\`
+Quotes the line as a Python string, choosing single or double quotes (same as \`repr()\`).
 
 * \`cols/$pattern/$columns\` e.g. \`cols/,/1,2,3\`
 Split the line by 'pattern' (default is \`/\\s+/\`) and print $columns, joined by ' '

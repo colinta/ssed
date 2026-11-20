@@ -1,4 +1,4 @@
-.TH "SSED" "1" "March 2026" "1.10.7"
+.TH "SSED" "1" "November 2026" "1.11.7"
 .SH "NAME"
 \fBssed\fR \- general purpose stream and file editor
 .SH SYNOPSIS
@@ -197,6 +197,26 @@ Surrounds the line in double quotes, replacing " with \\"
 `unquote`
 .br
 Removes initial and final matching quotes from the line\. Preceding and trailing whitespace is preserved (`trim` to remove)\.
+.IP \(bu 2
+`escape`
+.br
+Escapes non\-printable characters (e\.g\. `\\x1b` => `\\e`), backslashes and quotes using backslashes, compatible with bash `$'\.\.\.'` strings\.
+.IP \(bu 2
+`escape/quotes`
+.br
+Quotes the line for bash, using single quotes, double quotes, or `$'\.\.\.'` (if the line has non\-printable characters)\.
+.IP \(bu 2
+`escape/json`, `escape/js`
+.br
+Quotes the line as a JSON string (double quotes)\.
+.IP \(bu 2
+`escape/javascript`
+.br
+Quotes the line as a JavaScript string, choosing single quotes, double quotes, or backticks (whichever needs the fewest escapes)\.
+.IP \(bu 2
+`escape/python`, `escape/py`
+.br
+Quotes the line as a Python string, choosing single or double quotes (same as `repr()`)\.
 .IP \(bu 2
 `cols/$pattern/$columns` e\.g\. `cols/,/1,2,3`
 .br

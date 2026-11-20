@@ -137,6 +137,16 @@ Adds text to the beginning *and* end of the line
 Surrounds the line in double quotes, replacing " with \\"
 * \`unquote\`
 Removes initial and final matching quotes from the line. Preceding and trailing whitespace is preserved (\`trim\` to remove).
+* \`escape\`
+Escapes non-printable characters (e.g. \`\\x1b\` => \`\\e\`), backslashes and quotes using backslashes, compatible with bash \`$'...'\` strings.
+* \`escape/quotes\`
+Quotes the line for bash, using single quotes, double quotes, or \`$'...'\` (if the line has non-printable characters).
+* \`escape/json\`, \`escape/js\`
+Quotes the line as a JSON string (double quotes).
+* \`escape/javascript\`
+Quotes the line as a JavaScript string, choosing single quotes, double quotes, or backticks (whichever needs the fewest escapes).
+* \`escape/python\`, \`escape/py\`
+Quotes the line as a Python string, choosing single or double quotes (same as \`repr()\`).
 
 * \`cols/$pattern/$columns\` e.g. \`cols/,/1,2,3\`
 Split the line by 'pattern' (default is \`/\\s+/\`) and print $columns, joined by ' '

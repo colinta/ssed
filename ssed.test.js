@@ -195,6 +195,85 @@ describe('ssed', () => {
     })
   })
 
+  describe('escape rule', () => {
+    const input = [
+      `it's "here"`,
+      'plain text',
+      'color \x1b[31mred\x1b[0m\ttab \\ back',
+      '$HOME `cmd` ${x}',
+      `hey!'`,
+    ].join('\n')
+
+    async function run(rule) {
+      await ssed.main([rule], {
+        ...options,
+        input: createInputStream(input),
+        inputFrom: 'stdin',
+      })
+      return output().split('\n')
+    }
+
+    test('escape (bash backslashes)', async () => {
+      expect(await run('escape')).toEqual([
+        `it\\'s \\"here\\"`,
+        'plain text',
+        'color \\e[31mred\\e[0m\\ttab \\\\ back',
+        '$HOME `cmd` ${x}',
+        `hey!\\'`,
+      ])
+    })
+
+    test('escape/quotes (bash)', async () => {
+      expect(await run('escape/quotes')).toEqual([
+        `"it's \\"here\\""`,
+        `'plain text'`,
+        `$'color \\e[31mred\\e[0m\\ttab \\\\ back'`,
+        `'$HOME \`cmd\` \${x}'`,
+        `$'hey!\\''`,
+      ])
+    })
+
+    test('escape/json', async () => {
+      const expected = input.split('\n').map(line => JSON.stringify(line))
+      expect(await run('escape/json')).toEqual(expected)
+    })
+
+    test('escape/js is an alias for json', async () => {
+      const expected = input.split('\n').map(line => JSON.stringify(line))
+      expect(await run('escape/js')).toEqual(expected)
+    })
+
+    test('escape/javascript picks the best quote', async () => {
+      const lines = await run('escape/javascript')
+      expect(lines).toEqual([
+        '`it\'s "here"`',
+        `'plain text'`,
+        `'color \\u001b[31mred\\u001b[0m\\ttab \\\\ back'`,
+        `'$HOME \`cmd\` \${x}'`,
+        `"hey!'"`,
+      ])
+      const x = 'x'
+      expect(lines.map(line => eval(line))).toEqual(input.split('\n'))
+    })
+
+    test.each(['escape/python', 'escape/py'])('%s', async rule => {
+      const expected = [
+        `'it\\'s "here"'`,
+        `'plain text'`,
+        `'color \\x1b[31mred\\x1b[0m\\ttab \\\\ back'`,
+        `'$HOME \`cmd\` \${x}'`,
+        `"hey!'"`,
+      ]
+      expect(await run(rule)).toEqual(expected)
+    })
+
+    test('escape rejects unknown formats', async () => {
+      await expect(run('escape/bogus')).rejects.toThrow(
+        "Invalid format for 'escape'",
+      )
+    })
+  })
+
   describe('error handling', () => {
     test('rejects on invalid rule syntax', async () => {
       const {options} = setup()

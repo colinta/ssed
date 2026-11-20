@@ -92,6 +92,7 @@ Conditions can be chained: `if/foo/ if/bar/ { rules }`
 - **trim/** - Remove leading/trailing whitespace
 - **quote/** - Wrap in double quotes
 - **unquote/** - Remove outer quotes
+- **escape/** - Backslash-escape non-printables and quotes (bash); `escape/quotes|json|js|javascript|python|py` quote the line
 
 ### Column Rules
 - **cols//1,3,2** - Split by whitespace, select/reorder columns
