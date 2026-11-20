@@ -2574,7 +2574,7 @@ class DocumentJoinLinesRule extends DocumentRule {
 
   constructor(joiner) {
     super('', '', '', [])
-    this.joiner = joiner || ' '
+    this.joiner = joiner ?? ' '
   }
 
   lines(documentLines) {
@@ -2685,7 +2685,8 @@ function toDocumentRule([cmd, pattern, replace, rest, delim]) {
     case 'lines':
       return new DocumentLineNumbersRule(pattern, replace)
     case 'join':
-      return new DocumentJoinLinesRule(pattern)
+      // `join` => default (' '), `join/` or `join//` => empty separator
+      return new DocumentJoinLinesRule(delim ? (pattern ?? '') : null)
     case 'sl':
     case 'sublines':
       return new DocumentSubstituteLinesRule(

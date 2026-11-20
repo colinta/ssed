@@ -142,6 +142,30 @@ describe('ssed', () => {
 
       expect(output()).toBe('a b c')
     })
+
+    test('join lines with empty separator', async () => {
+      const input = createInputStream('a\nb\nc')
+
+      await ssed.main(['join//'], {
+        ...options,
+        input,
+        inputFrom: 'stdin',
+      })
+
+      expect(output()).toBe('abc')
+    })
+
+    test('join/ (trailing delimiter) uses empty separator', async () => {
+      const input = createInputStream('a\nb\nc')
+
+      await ssed.main(['join/'], {
+        ...options,
+        input,
+        inputFrom: 'stdin',
+      })
+
+      expect(output()).toBe('abc')
+    })
   })
 
   describe('conditional operations', () => {
